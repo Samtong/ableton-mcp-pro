@@ -106,7 +106,8 @@ class AbletonConnection:
             "create_clip", "add_notes_to_clip", "set_clip_name",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
             "batch_set_device_parameters",
-            "start_playback", "stop_playback", "load_instrument_or_effect"
+            "start_playback", "stop_playback", "load_instrument_or_effect",
+            "load_browser_item", "set_track_volume", "set_track_panning"
         ]
         
         try:
@@ -487,9 +488,10 @@ def batch_set_device_parameters(ctx: Context, track_index: int, device_index: in
 def load_instrument_or_effect(ctx: Context, track_index: int, uri: str) -> str:
     """
     Load an instrument or effect onto a track using its URI.
-    
+    Use track_index -1 for the master track.
+
     Parameters:
-    - track_index: The index of the track to load the instrument on
+    - track_index: The index of the track to load on (-1 for master)
     - uri: The URI of the instrument or effect to load (e.g., 'query:Synths#Instrument%20Rack:Bass:FileId_5116')
     """
     try:
@@ -727,6 +729,50 @@ def load_drum_kit(ctx: Context, track_index: int, rack_uri: str, kit_path: str) 
     except Exception as e:
         logger.error(f"Error loading drum kit: {str(e)}")
         return f"Error loading drum kit: {str(e)}"
+
+@mcp.tool()
+def set_track_volume(ctx: Context, track_index: int, volume: float) -> str:
+    """
+    Set a track's volume level using a normalized value (0.0 to 1.0).
+    Use track_index -1 for the master track.
+
+    Parameters:
+    - track_index: The index of the track (-1 for master)
+    - volume: Normalized volume value (0.0 = silent, 0.85 = default, 1.0 = max)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_volume", {
+            "track_index": track_index,
+            "volume": volume
+        })
+        track_name = result.get("track_name", "unknown")
+        return f"Set '{track_name}' volume to {volume:.2f}"
+    except Exception as e:
+        logger.error(f"Error setting track volume: {str(e)}")
+        return f"Error setting track volume: {str(e)}"
+
+@mcp.tool()
+def set_track_panning(ctx: Context, track_index: int, panning: float) -> str:
+    """
+    Set a track's panning using a normalized value (0.0 to 1.0, where 0.5 is center).
+    Use track_index -1 for the master track.
+
+    Parameters:
+    - track_index: The index of the track (-1 for master)
+    - panning: Normalized panning value (0.0 = full left, 0.5 = center, 1.0 = full right)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_panning", {
+            "track_index": track_index,
+            "panning": panning
+        })
+        track_name = result.get("track_name", "unknown")
+        return f"Set '{track_name}' panning to {panning:.2f}"
+    except Exception as e:
+        logger.error(f"Error setting track panning: {str(e)}")
+        return f"Error setting track panning: {str(e)}"
 
 # Main execution
 def main():

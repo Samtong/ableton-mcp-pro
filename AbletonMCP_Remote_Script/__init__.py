@@ -234,7 +234,9 @@ class AbletonMCP(ControlSurface):
                                  "create_clip", "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "load_browser_item",
-                                 "set_device_parameter", "batch_set_device_parameters"]:
+                                 "load_instrument_or_effect",
+                                 "set_device_parameter", "batch_set_device_parameters",
+                                 "set_track_volume", "set_track_panning"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -282,7 +284,7 @@ class AbletonMCP(ControlSurface):
                         elif command_type == "load_instrument_or_effect":
                             track_index = params.get("track_index", 0)
                             uri = params.get("uri", "")
-                            result = self._load_instrument_or_effect(track_index, uri)
+                            result = self._load_browser_item(track_index, uri)
                         elif command_type == "load_browser_item":
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
@@ -299,6 +301,14 @@ class AbletonMCP(ControlSurface):
                             parameter_indices = params.get("parameter_indices", [])
                             values = params.get("values", [])
                             result = self._batch_set_device_parameters(track_index, device_index, parameter_indices, values)
+                        elif command_type == "set_track_volume":
+                            track_index = params.get("track_index", 0)
+                            volume = params.get("volume", 0.85)
+                            result = self._set_track_volume(track_index, volume)
+                        elif command_type == "set_track_panning":
+                            track_index = params.get("track_index", 0)
+                            panning = params.get("panning", 0.0)
+                            result = self._set_track_panning(track_index, panning)
 
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -431,12 +441,60 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error getting track info: " + str(e))
             raise
     
+    def _get_track(self, track_index):
+        """Get a track by index. Use -1 for master track, -2/-3/etc for return tracks."""
+        if track_index == -1:
+            return self._song.master_track
+        elif track_index < -1:
+            return_index = -(track_index + 2)  # -2 -> 0, -3 -> 1
+            if return_index < 0 or return_index >= len(self._song.return_tracks):
+                raise IndexError("Return track index out of range")
+            return self._song.return_tracks[return_index]
+        else:
+            if track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            return self._song.tracks[track_index]
+
+    def _set_track_volume(self, track_index, volume):
+        """Set a track's volume using a normalized value (0.0 to 1.0)"""
+        try:
+            track = self._get_track(track_index)
+            if volume < 0.0 or volume > 1.0:
+                raise ValueError("Volume must be between 0.0 and 1.0")
+            vol_param = track.mixer_device.volume
+            actual_value = vol_param.min + volume * (vol_param.max - vol_param.min)
+            vol_param.value = actual_value
+            return {
+                "track_name": track.name,
+                "volume": vol_param.value,
+                "normalized_volume": volume
+            }
+        except Exception as e:
+            self.log_message("Error setting track volume: " + str(e))
+            raise
+
+    def _set_track_panning(self, track_index, panning):
+        """Set a track's panning using a normalized value (0.0 to 1.0, 0.5 = center)"""
+        try:
+            track = self._get_track(track_index)
+            if panning < 0.0 or panning > 1.0:
+                raise ValueError("Panning must be between 0.0 and 1.0")
+            pan_param = track.mixer_device.panning
+            actual_value = pan_param.min + panning * (pan_param.max - pan_param.min)
+            pan_param.value = actual_value
+            return {
+                "track_name": track.name,
+                "panning": pan_param.value,
+                "normalized_panning": panning
+            }
+        except Exception as e:
+            self.log_message("Error setting track panning: " + str(e))
+            raise
+
     def _get_device_parameters(self, track_index, device_index):
         """Get all parameters of a device on a track"""
         try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-            track = self._song.tracks[track_index]
+            track = self._get_track(track_index)
             if device_index < 0 or device_index >= len(track.devices):
                 raise IndexError("Device index out of range")
             device = track.devices[device_index]
@@ -469,9 +527,7 @@ class AbletonMCP(ControlSurface):
     def _set_device_parameter(self, track_index, device_index, parameter_index, value):
         """Set a single device parameter using a normalized value (0.0 to 1.0)"""
         try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-            track = self._song.tracks[track_index]
+            track = self._get_track(track_index)
             if device_index < 0 or device_index >= len(track.devices):
                 raise IndexError("Device index out of range")
             device = track.devices[device_index]
@@ -494,9 +550,7 @@ class AbletonMCP(ControlSurface):
     def _batch_set_device_parameters(self, track_index, device_index, parameter_indices, values):
         """Set multiple device parameters at once using normalized values (0.0 to 1.0)"""
         try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-            track = self._song.tracks[track_index]
+            track = self._get_track(track_index)
             if device_index < 0 or device_index >= len(track.devices):
                 raise IndexError("Device index out of range")
             device = track.devices[device_index]
@@ -837,12 +891,9 @@ class AbletonMCP(ControlSurface):
     
     
     def _load_browser_item(self, track_index, item_uri):
-        """Load a browser item onto a track by its URI"""
+        """Load a browser item onto a track by its URI. Use -1 for master track."""
         try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
-            
-            track = self._song.tracks[track_index]
+            track = self._get_track(track_index)
             
             # Access the application's browser instance instead of creating a new one
             app = self.application()
