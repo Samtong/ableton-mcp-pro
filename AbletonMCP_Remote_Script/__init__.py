@@ -239,12 +239,22 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._get_arrangement_clips(track_index)
             elif command_type == "get_full_arrangement":
                 response["result"] = self._get_full_arrangement()
+            elif command_type == "get_clip_notes":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                response["result"] = self._get_clip_notes(track_index, clip_index)
+            elif command_type == "get_clip_envelope":
+                track_index = params.get("track_index", 0)
+                clip_index = params.get("clip_index", 0)
+                device_index = params.get("device_index", 0)
+                parameter_index = params.get("parameter_index", 0)
+                response["result"] = self._get_clip_envelope(track_index, clip_index, device_index, parameter_index)
             elif command_type == "record_arrangement":
                 # Runs on socket thread with schedule_message for main thread ops
                 sections = params.get("sections", [])
                 response["result"] = self._record_arrangement(sections)
             elif command_type in ["create_midi_track", "set_track_name",
-                                 "create_clip", "add_notes_to_clip", "set_clip_name",
+                                 "create_clip", "create_audio_clip", "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "load_browser_item",
                                  "load_instrument_or_effect",
@@ -256,7 +266,11 @@ class AbletonMCP(ControlSurface):
                                  "set_track_mute", "set_track_solo",
                                  "delete_clip", "duplicate_clip",
                                  "create_scene", "delete_scene", "set_scene_name",
-                                 "create_audio_track", "delete_track"]:
+                                 "create_audio_track", "delete_track",
+                                 "delete_device", "duplicate_track", "set_clip_loop",
+                                 "set_track_arm", "set_send_level", "set_time_signature",
+                                 "set_metronome", "set_clip_envelope", "clear_clip_envelope",
+                                 "undo", "redo", "save"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -276,6 +290,11 @@ class AbletonMCP(ControlSurface):
                             clip_index = params.get("clip_index", 0)
                             length = params.get("length", 4.0)
                             result = self._create_clip(track_index, clip_index, length)
+                        elif command_type == "create_audio_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            file_path = params.get("file_path", "")
+                            result = self._create_audio_clip(track_index, clip_index, file_path)
                         elif command_type == "add_notes_to_clip":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -304,11 +323,13 @@ class AbletonMCP(ControlSurface):
                         elif command_type == "load_instrument_or_effect":
                             track_index = params.get("track_index", 0)
                             uri = params.get("uri", "")
-                            result = self._load_browser_item(track_index, uri)
+                            clip_index = params.get("clip_index", None)
+                            result = self._load_browser_item(track_index, uri, clip_index=clip_index)
                         elif command_type == "load_browser_item":
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
-                            result = self._load_browser_item(track_index, item_uri)
+                            clip_index = params.get("clip_index", None)
+                            result = self._load_browser_item(track_index, item_uri, clip_index=clip_index)
                         elif command_type == "set_device_parameter":
                             track_index = params.get("track_index", 0)
                             device_index = params.get("device_index", 0)
@@ -381,6 +402,55 @@ class AbletonMCP(ControlSurface):
                         elif command_type == "delete_track":
                             track_index = params.get("track_index", 0)
                             result = self._delete_track(track_index)
+                        elif command_type == "delete_device":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            result = self._delete_device(track_index, device_index)
+                        elif command_type == "duplicate_track":
+                            track_index = params.get("track_index", 0)
+                            result = self._duplicate_track(track_index)
+                        elif command_type == "set_clip_loop":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            loop_start = params.get("loop_start", None)
+                            loop_end = params.get("loop_end", None)
+                            looping = params.get("looping", None)
+                            result = self._set_clip_loop(track_index, clip_index, loop_start, loop_end, looping)
+                        elif command_type == "set_track_arm":
+                            track_index = params.get("track_index", 0)
+                            arm = params.get("arm", False)
+                            result = self._set_track_arm(track_index, arm)
+                        elif command_type == "set_send_level":
+                            track_index = params.get("track_index", 0)
+                            send_index = params.get("send_index", 0)
+                            value = params.get("value", 0.0)
+                            result = self._set_send_level(track_index, send_index, value)
+                        elif command_type == "set_time_signature":
+                            numerator = params.get("numerator", 4)
+                            denominator = params.get("denominator", 4)
+                            result = self._set_time_signature(numerator, denominator)
+                        elif command_type == "set_metronome":
+                            on = params.get("on", False)
+                            result = self._set_metronome(on)
+                        elif command_type == "set_clip_envelope":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            parameter_index = params.get("parameter_index", 0)
+                            device_index = params.get("device_index", 0)
+                            points = params.get("points", [])
+                            result = self._set_clip_envelope(track_index, clip_index, device_index, parameter_index, points)
+                        elif command_type == "clear_clip_envelope":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            parameter_index = params.get("parameter_index", 0)
+                            device_index = params.get("device_index", 0)
+                            result = self._clear_clip_envelope(track_index, clip_index, device_index, parameter_index)
+                        elif command_type == "undo":
+                            result = self._undo()
+                        elif command_type == "redo":
+                            result = self._redo()
+                        elif command_type == "save":
+                            result = self._save()
 
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -964,9 +1034,22 @@ class AbletonMCP(ControlSurface):
                     self.log_message("Recording section {0}: scene {1} ({2}) for {3} bars".format(
                         i + 1, scene_index, scene_name_holder[0], bars))
 
-                    # Wait for the section duration (on background thread — doesn't block UI)
-                    duration_seconds = bars * beats_per_bar * seconds_per_beat
-                    time_module.sleep(duration_seconds)
+                    # Wait until the target beat position (more accurate than time.sleep)
+                    target_beat = (total_bars + bars) * beats_per_bar
+                    while True:
+                        current_time_holder = [0.0]
+                        def get_time():
+                            current_time_holder[0] = self._song.current_song_time
+                        do_on_main(get_time)
+                        if current_time_holder[0] >= target_beat - 0.5:
+                            break
+                        # Sleep a short interval then check again
+                        remaining = target_beat - current_time_holder[0]
+                        remaining_seconds = remaining * seconds_per_beat
+                        if remaining_seconds > 1.0:
+                            time_module.sleep(remaining_seconds - 0.5)
+                        else:
+                            time_module.sleep(0.05)
 
                     recorded_sections.append({
                         "scene_index": scene_index,
@@ -1014,6 +1097,311 @@ class AbletonMCP(ControlSurface):
         if not result_holder["done"]:
             raise Exception("Recording timed out")
         return result_holder["result"]
+
+    def _delete_device(self, track_index, device_index):
+        """Delete a device from a track"""
+        try:
+            track = self._get_track(track_index)
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            device_name = track.devices[device_index].name
+            track.delete_device(device_index)
+            return {
+                "deleted_device": device_name,
+                "device_count": len(track.devices)
+            }
+        except Exception as e:
+            self.log_message("Error deleting device: " + str(e))
+            raise
+
+    def _duplicate_track(self, track_index):
+        """Duplicate a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track_name = self._song.tracks[track_index].name
+            self._song.duplicate_track(track_index)
+            new_track = self._song.tracks[track_index + 1]
+            return {
+                "original_track": track_name,
+                "new_track_index": track_index + 1,
+                "new_track_name": new_track.name,
+                "track_count": len(self._song.tracks)
+            }
+        except Exception as e:
+            self.log_message("Error duplicating track: " + str(e))
+            raise
+
+    def _set_clip_loop(self, track_index, clip_index, loop_start, loop_end, looping):
+        """Set clip loop settings"""
+        try:
+            track = self._song.tracks[track_index]
+            clip_slot = track.clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+            clip = clip_slot.clip
+            if looping is not None:
+                clip.looping = bool(looping)
+            if loop_start is not None:
+                clip.loop_start = float(loop_start)
+            if loop_end is not None:
+                clip.loop_end = float(loop_end)
+            return {
+                "looping": clip.looping,
+                "loop_start": clip.loop_start,
+                "loop_end": clip.loop_end,
+                "length": clip.length
+            }
+        except Exception as e:
+            self.log_message("Error setting clip loop: " + str(e))
+            raise
+
+    def _get_clip_notes(self, track_index, clip_index):
+        """Get all notes from a MIDI clip"""
+        try:
+            track = self._song.tracks[track_index]
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+            clip_slot = track.clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+            clip = clip_slot.clip
+            if not clip.is_midi_clip:
+                raise Exception("Not a MIDI clip")
+            notes = clip.get_notes_extended(from_pitch=0, pitch_span=128, from_time=0, time_span=clip.length)
+            note_list = []
+            for note in notes:
+                note_list.append({
+                    "pitch": note.pitch,
+                    "start_time": note.start_time,
+                    "duration": note.duration,
+                    "velocity": note.velocity,
+                    "mute": note.mute
+                })
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "clip_name": clip.name,
+                "length": clip.length,
+                "note_count": len(note_list),
+                "notes": note_list
+            }
+        except Exception as e:
+            self.log_message("Error getting clip notes: " + str(e))
+            raise
+
+    def _set_track_arm(self, track_index, arm):
+        """Set track arm state"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if not track.can_be_armed:
+                raise Exception("Track cannot be armed")
+            track.arm = bool(arm)
+            return {
+                "track_index": track_index,
+                "track_name": track.name,
+                "arm": track.arm
+            }
+        except Exception as e:
+            self.log_message("Error setting track arm: " + str(e))
+            raise
+
+    def _set_send_level(self, track_index, send_index, value):
+        """Set send level for a track"""
+        try:
+            track = self._get_track(track_index)
+            sends = track.mixer_device.sends
+            if send_index < 0 or send_index >= len(sends):
+                raise IndexError("Send index out of range (track has {0} sends)".format(len(sends)))
+            send = sends[send_index]
+            send.value = max(send.min, min(send.max, send.min + float(value) * (send.max - send.min)))
+            return {
+                "track_index": track_index,
+                "send_index": send_index,
+                "value": value,
+                "actual_value": send.value
+            }
+        except Exception as e:
+            self.log_message("Error setting send level: " + str(e))
+            raise
+
+    def _set_time_signature(self, numerator, denominator):
+        """Set the song time signature"""
+        try:
+            self._song.signature_numerator = int(numerator)
+            self._song.signature_denominator = int(denominator)
+            return {
+                "numerator": self._song.signature_numerator,
+                "denominator": self._song.signature_denominator
+            }
+        except Exception as e:
+            self.log_message("Error setting time signature: " + str(e))
+            raise
+
+    def _set_metronome(self, on):
+        """Set metronome on/off"""
+        try:
+            self._song.metronome = bool(on)
+            return {"metronome": self._song.metronome}
+        except Exception as e:
+            self.log_message("Error setting metronome: " + str(e))
+            raise
+
+    def _set_clip_envelope(self, track_index, clip_index, device_index, parameter_index, points):
+        """Set automation envelope points for a parameter in a clip.
+        points: list of {"time": float, "value": float} (value is normalized 0-1)"""
+        try:
+            track = self._song.tracks[track_index]
+            clip_slot = track.clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+            clip = clip_slot.clip
+
+            device = track.devices[device_index]
+            param = device.parameters[parameter_index]
+
+            # Try to get existing envelope, or create one
+            envelope = clip.automation_envelope(param)
+            if envelope is None:
+                # Create a new envelope for this parameter
+                envelope = clip.create_automation_envelope(param)
+            if envelope is None:
+                raise Exception("Could not create automation envelope for parameter")
+
+            # Sort points by time and interpolate smooth ramps between them
+            sorted_points = sorted(points, key=lambda p: float(p.get("time", 0)))
+            step_size = 0.25  # beats per interpolation step
+            for i in range(len(sorted_points) - 1):
+                t0 = float(sorted_points[i].get("time", 0))
+                v0 = float(sorted_points[i].get("value", 0))
+                t1 = float(sorted_points[i + 1].get("time", 0))
+                v1 = float(sorted_points[i + 1].get("value", 0))
+                segment_duration = t1 - t0
+                num_steps = max(1, int(segment_duration / step_size))
+                for s in range(num_steps):
+                    frac = s / float(num_steps)
+                    t = t0 + frac * segment_duration
+                    v = v0 + frac * (v1 - v0)
+                    actual = param.min + v * (param.max - param.min)
+                    envelope.insert_step(t, step_size, actual)
+            # Last point holds for 1 beat
+            if sorted_points:
+                last = sorted_points[-1]
+                t = float(last.get("time", 0))
+                v = float(last.get("value", 0))
+                actual = param.min + v * (param.max - param.min)
+                envelope.insert_step(t, 1.0, actual)
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "device_index": device_index,
+                "parameter_index": parameter_index,
+                "parameter_name": param.name,
+                "points_set": len(points)
+            }
+        except Exception as e:
+            self.log_message("Error setting clip envelope: " + str(e))
+            raise
+
+    def _get_clip_envelope(self, track_index, clip_index, device_index, parameter_index):
+        """Read automation envelope data for a parameter in a clip."""
+        try:
+            track = self._song.tracks[track_index]
+            clip_slot = track.clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+            clip = clip_slot.clip
+
+            device = track.devices[device_index]
+            param = device.parameters[parameter_index]
+
+            envelope = clip.automation_envelope(param)
+            if envelope is None:
+                return {
+                    "track_index": track_index,
+                    "clip_index": clip_index,
+                    "parameter_name": param.name,
+                    "has_envelope": False,
+                    "points": []
+                }
+
+            # Read envelope value at regular intervals across the clip
+            clip_length = clip.length
+            num_samples = min(int(clip_length), 64)  # Sample up to 64 points
+            step = clip_length / num_samples if num_samples > 0 else 1.0
+            points = []
+            for i in range(num_samples):
+                t = i * step
+                val = envelope.value_at_time(t)
+                # Normalize to 0-1
+                param_range = param.max - param.min
+                normalized = (val - param.min) / param_range if param_range > 0 else 0
+                points.append({"time": round(t, 3), "value": round(normalized, 4)})
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "parameter_name": param.name,
+                "has_envelope": True,
+                "points": points
+            }
+        except Exception as e:
+            self.log_message("Error getting clip envelope: " + str(e))
+            raise
+
+    def _clear_clip_envelope(self, track_index, clip_index, device_index, parameter_index):
+        """Clear automation envelope for a parameter in a clip"""
+        try:
+            track = self._song.tracks[track_index]
+            clip_slot = track.clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+            clip = clip_slot.clip
+
+            device = track.devices[device_index]
+            param = device.parameters[parameter_index]
+
+            clip.clear_envelope(param)
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "parameter_name": param.name,
+                "cleared": True
+            }
+        except Exception as e:
+            self.log_message("Error clearing clip envelope: " + str(e))
+            raise
+
+    def _undo(self):
+        """Undo the last action"""
+        try:
+            self._song.undo()
+            return {"undone": True}
+        except Exception as e:
+            self.log_message("Error undoing: " + str(e))
+            raise
+
+    def _redo(self):
+        """Redo the last undone action"""
+        try:
+            self._song.redo()
+            return {"redone": True}
+        except Exception as e:
+            self.log_message("Error redoing: " + str(e))
+            raise
+
+    def _save(self):
+        """Save the current Live set"""
+        try:
+            self._song.save()
+            return {"saved": True}
+        except Exception as e:
+            self.log_message("Error saving: " + str(e))
+            raise
 
     def _get_device_parameters(self, track_index, device_index):
         """Get all parameters of a device on a track"""
@@ -1172,6 +1560,41 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error creating clip: " + str(e))
             raise
     
+    def _create_audio_clip(self, track_index, clip_index, file_path):
+        """Create an audio clip from a file path in a clip slot on an audio track."""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if not track.has_audio_input:
+                raise Exception("Track {0} is not an audio track".format(track_index))
+
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+
+            clip_slot = track.clip_slots[clip_index]
+
+            if clip_slot.has_clip:
+                raise Exception("Clip slot already has a clip")
+
+            # Create audio clip from file path
+            clip_slot.create_clip(file_path)
+
+            clip = clip_slot.clip
+            result = {
+                "name": clip.name if clip else "unknown",
+                "length": clip.length if clip else 0,
+                "file_path": file_path,
+                "track_index": track_index,
+                "clip_index": clip_index
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error creating audio clip: " + str(e))
+            raise
+
     def _add_notes_to_clip(self, track_index, clip_index, notes):
         """Add MIDI notes to a clip"""
         try:
@@ -1414,23 +1837,29 @@ class AbletonMCP(ControlSurface):
     
     
     
-    def _load_browser_item(self, track_index, item_uri):
-        """Load a browser item onto a track by its URI. Use -1 for master track."""
+    def _load_browser_item(self, track_index, item_uri, clip_index=None):
+        """Load a browser item onto a track by its URI. Use -1 for master track.
+        If clip_index is provided, selects that clip slot before loading (needed for .alc clips)."""
         try:
             track = self._get_track(track_index)
-            
+
             # Access the application's browser instance instead of creating a new one
             app = self.application()
-            
+
             # Find the browser item by URI
             item = self._find_browser_item_by_uri(app.browser, item_uri)
-            
+
             if not item:
                 raise ValueError("Browser item with URI '{0}' not found".format(item_uri))
-            
+
             # Select the track
             self._song.view.selected_track = track
-            
+
+            # If clip_index provided, select that clip slot so .alc clips land there
+            if clip_index is not None and hasattr(track, 'clip_slots'):
+                if clip_index < len(track.clip_slots):
+                    self._song.view.highlighted_clip_slot = track.clip_slots[clip_index]
+
             # Load the item
             app.browser.load_item(item)
             
@@ -1465,8 +1894,14 @@ class AbletonMCP(ControlSurface):
                     browser_or_item.sounds,
                     browser_or_item.drums,
                     browser_or_item.audio_effects,
-                    browser_or_item.midi_effects
+                    browser_or_item.midi_effects,
                 ]
+                # Add optional categories that may not exist on all versions
+                for attr in ['clips', 'samples', 'packs', 'user_library', 'current_project', 'max_for_live']:
+                    if hasattr(browser_or_item, attr):
+                        cat = getattr(browser_or_item, attr)
+                        if cat is not None:
+                            categories.append(cat)
                 
                 for category in categories:
                     item = self._find_browser_item_by_uri(category, uri, max_depth, current_depth + 1)

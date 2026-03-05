@@ -364,16 +364,63 @@ The cached `self._song = self.song()` reference becomes invalid when Ableton swa
 
 Cannot delete or trim individual arrangement clips via the API. Only workaround is recording an empty scene (no clips) over the section to erase it.
 
-### Recording Timing is Approximate
+### Recording Timing Drift (~4 beats)
 
-`time.sleep`-based timing isn't sample-accurate. Section transitions may drift by 1-2 beats over long recordings. Observed ~1.6 beat drift after 48 bars at 130 BPM. Potential improvements:
-- Use `song.current_song_time` polling instead of `time.sleep` for more accurate timing
-- Add a `fire_scene_at_time` command that waits for a specific beat position
-- Use clip trigger quantization settings in Ableton
+Scene transitions drift ~4 beats (1 bar) over a 48-bar recording at 130 BPM. The recording uses `song.current_song_time` polling (not `time.sleep`), but scene firing isn't quantized — there's latency between detecting the target beat and the scene actually firing. Fix: set `song.clip_trigger_quantization` to snap fires to bar boundaries.
 
 ### Arrangement Clips Are Read-Only
 
 The LOM only supports reading arrangement clips, not creating/modifying/deleting them. The only way to build an arrangement is recording from session view. The only way to erase is recording silence.
+
+## Clip Automation
+
+### Setting Automation Envelopes
+
+Use `set_clip_envelope(track_index, clip_index, device_index, parameter_index, points)` to add automation to session clips. Points are `{"time": float, "value": float}` where value is normalized 0.0-1.0.
+
+The implementation interpolates between points with 0.25-beat steps to create smooth ramps (the LOM's `insert_step` only supports flat steps, so many small steps approximate a ramp).
+
+```python
+# Sweep Auto Filter Frequency from 0.2 to 0.6 and back over a 28-beat clip
+set_clip_envelope(
+    track_index=5, clip_index=1,
+    device_index=1, parameter_index=1,
+    points=[
+        {"time": 0, "value": 0.2},
+        {"time": 7, "value": 0.5},
+        {"time": 14, "value": 0.6},
+        {"time": 21, "value": 0.35},
+        {"time": 27, "value": 0.2}
+    ]
+)
+```
+
+### Reading Envelopes
+
+Use `get_clip_envelope(track_index, clip_index, device_index, parameter_index)` to read automation data. Returns sampled values at 1-beat intervals across the clip length.
+
+### Clearing Envelopes
+
+Use `clear_clip_envelope(track_index, clip_index, device_index, parameter_index)` to remove automation.
+
+### Automation in Arrangements
+
+Automation can only be set on session clips, not arrangement clips. When recording the arrangement with `record_arrangement`, the session clip automation gets baked into the arrangement automatically.
+
+## Audio Clip Loading
+
+### What Works
+- **MIDI clips**: Fully supported — create with `create_clip`, add notes with `add_notes_to_clip`
+- **Instruments/effects**: Load via `load_instrument_or_effect(track_index, uri)` using browser URIs
+- **.alc Live Clips on MIDI tracks**: Manual drag-and-drop works (loads both instrument and clip)
+
+### What Doesn't Work (Yet)
+- `browser.load_item()` for .alc files only loads the device chain, not the audio/MIDI clip itself
+- `ClipSlot.create_clip()` in the Remote Script API only accepts a `double` (length), not file paths
+- The LOM's file-path-based audio clip creation may be Max for Live specific
+
+### Workaround
+For audio clips, manually drag from Ableton's browser. For MIDI clips from .alc files, drag manually — the instrument rack and clip both load correctly.
 
 ## Common Gotchas
 

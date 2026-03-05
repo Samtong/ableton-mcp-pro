@@ -9,13 +9,21 @@ Roadmap for achieving full Ableton control via MCP.
 - [x] **Create audio track** — `create_audio_track(index)`
 - [x] **Delete track** — `delete_track(track_index)`
 - [x] **Duplicate clip** — `duplicate_clip(track_index, clip_index, target_index)`
+- [x] **Duplicate track** — `duplicate_track(track_index)`
+- [x] **Delete device** — `delete_device(track_index, device_index)`
+- [x] **Set clip loop** — `set_clip_loop(track_index, clip_index, loop_start, loop_end, looping)`
+- [x] **Get clip notes** — `get_clip_notes(track_index, clip_index)`
 
-### Mixing
-- [x] **Set track volume** — `set_track_volume(track_index, volume)` (0.0–1.0)
-- [x] **Set track panning** — `set_track_panning(track_index, panning)` (0.0–1.0, 0.5=center)
+### Mixing & Routing
+- [x] **Set track volume** — `set_track_volume(track_index, volume)` (0.0-1.0)
+- [x] **Set track panning** — `set_track_panning(track_index, panning)` (0.0-1.0, 0.5=center)
 - [x] **Mute track** — `set_track_mute(track_index, mute)`
 - [x] **Solo track** — `set_track_solo(track_index, solo)`
 - [x] **Master/return track support** — `track_index: -1` for master, `-2`/`-3` for returns
+- [x] **Arm track** — `set_track_arm(track_index, arm)`
+- [x] **Send levels** — `set_send_level(track_index, send_index, value)`
+- [x] **Set time signature** — `set_time_signature(numerator, denominator)`
+- [x] **Metronome** — `set_metronome(on)`
 
 ### Transport & Scene Control
 - [x] **Scene launch** — `fire_scene(scene_index)`
@@ -32,63 +40,60 @@ Roadmap for achieving full Ableton control via MCP.
 - [x] **Set arrangement loop** — `set_arrangement_loop(on, start, length)`
 - [x] **Get arrangement clips** — `get_arrangement_clips(track_index)` — per-track
 - [x] **Get full arrangement** — `get_full_arrangement()` — all tracks, scenes, tempo
-- [x] **Record arrangement** — `record_arrangement(sections)` — high-level command with background threading
+- [x] **Record arrangement** — `record_arrangement(sections)` — beat-accurate with background threading
 
 ### Device Control
 - [x] **Get device parameters** — `get_device_parameters(track_index, device_index)`
 - [x] **Set device parameter** — `set_device_parameter(track_index, device_index, parameter_index, value)`
 - [x] **Batch set device parameters** — `batch_set_device_parameters(...)`
-- [x] **Load instrument/effect** — `load_instrument_or_effect(track_index, uri)`
+- [x] **Load instrument/effect** — `load_instrument_or_effect(track_index, uri, clip_index)`
+
+### Automation
+- [x] **Set clip envelope** — `set_clip_envelope(track_index, clip_index, device_index, parameter_index, points)` — smooth interpolated ramps
+- [x] **Get clip envelope** — `get_clip_envelope(track_index, clip_index, device_index, parameter_index)` — read automation data
+- [x] **Clear clip envelope** — `clear_clip_envelope(track_index, clip_index, device_index, parameter_index)`
+
+### Advanced
+- [x] **Undo** — `undo()`
+- [x] **Redo** — `redo()`
+- [x] **Save** — `save()`
 
 ---
 
-## Phase 1: Recording Accuracy (High Priority)
+## Known Limitations
 
-The biggest gap — arrangement recording uses `time.sleep` which drifts. Transitions end up 1-2 beats off after long recordings.
+### Arrangement Clips Are Read-Only
+The LOM cannot create, delete, or modify arrangement clips directly. The only way to populate the arrangement is by recording session clips into it using `record_arrangement`. To erase content, record an empty scene over the region.
 
-- [ ] **Beat-accurate scene timing** — Poll `song.current_song_time` in a tight loop instead of `time.sleep` to fire scenes at exact beat positions. This would eliminate timing drift entirely.
-- [ ] **Clip trigger quantization** — `set_clip_trigger_quantization(value)` — set `song.clip_trigger_quantization` to snap scene fires to bar boundaries. Values: 0=None, 4=1 Bar, 5=2 Bars, etc.
-- [ ] **Verify recording results** — After `record_arrangement`, automatically call `get_full_arrangement` and validate that clip boundaries match expected positions.
+### Recording Timing Drift (~4 beats)
+Scene transitions drift ~4 beats (1 bar) over a 48-bar recording despite using `song.current_song_time` polling. This is because scene firing isn't quantized — the scene fires immediately when the poll detects the target beat, but there's latency between detection and execution. Setting `clip_trigger_quantization` to snap to bar boundaries would fix this.
 
-## Phase 2: Missing CRUD Operations
+### Audio Clip Loading
+- `browser.load_item()` works for instruments/effects but .alc audio clips only load device chains, not the audio clip itself
+- `ClipSlot.create_clip()` in the Remote Script API only accepts a `double` (length for MIDI clips), not file paths
+- The file-path-based audio clip creation may be Max for Live specific
+- **Workaround**: manually drag audio clips from Ableton's browser
 
-- [ ] **Delete/remove device** — `delete_device(track_index, device_index)` — call `track.delete_device(device_index)`
-- [ ] **Duplicate track** — `duplicate_track(track_index)` — call `song.duplicate_track(track_index)`
-- [ ] **Set clip loop settings** — `set_clip_loop(track_index, clip_index, loop_start, loop_end, looping)`
-- [ ] **Get/set clip notes** — read existing notes from a clip (currently can only add)
+### Stale Song Reference
+After Ableton restarts or swaps documents, cached `self._song` becomes invalid. Fixed by refreshing `self._song = self.song()` at the start of every `_process_command`, but the first command after a restart may still fail (retry works).
 
-## Phase 3: Mixing & Routing
+---
 
-- [ ] **Arm track** — `set_track_arm(track_index, arm)` — set `track.arm`
-- [ ] **Send levels** — `set_send_level(track_index, send_index, value)` — set `track.mixer_device.sends[send_index].value`
+## Remaining Work
+
+### High Priority: Recording Accuracy
+- [ ] **Clip trigger quantization** — `set_clip_trigger_quantization(value)` — set `song.clip_trigger_quantization` to snap scene fires to bar boundaries (0=None, 4=1 Bar, 5=2 Bars). This would eliminate the ~4 beat drift entirely.
+- [ ] **Verify recording results** — After `record_arrangement`, automatically call `get_full_arrangement` and validate clip boundaries match expected positions.
+
+### Audio Support
+- [ ] **Investigate Max for Live API** — M4L may expose `ClipSlot.create_clip(file_path)` for audio files. Could add an M4L device as a bridge.
+- [ ] **Audio clip from file** — If M4L bridge works, `create_audio_clip(track_index, clip_index, file_path)` for wav/aiff/flac/mp3
+
+### Mixing & Routing
 - [ ] **Track routing** — `set_track_input/output(track_index, routing_type, channel)`
-- [ ] **Set time signature** — `set_time_signature(numerator, denominator)`
-- [ ] **Metronome** — `set_metronome(on)` — set `song.metronome`
 
-## Phase 4: Automation
-
-Parameter automation within clips — adds movement and expression.
-
-- [ ] **Get clip envelopes** — `get_clip_envelopes(track_index, clip_index)` — read automation data
-- [ ] **Set automation point** — `insert_automation_value(track_index, clip_index, parameter_id, time, value)`
-- [ ] **Clear automation** — `clear_envelope(track_index, clip_index, parameter_id)`
-
-## Phase 5: Advanced
-
-Nice-to-haves for a complete integration.
-
-- [ ] **Undo** — `undo()` — call `song.undo()`
-- [ ] **Redo** — `redo()` — call `song.redo()`
-- [ ] **Save** — `save()` — call `song.save()`
-- [ ] **Audio clip support** — loading audio files onto audio tracks
+### Nice-to-Haves
 - [ ] **Capture MIDI** — `song.capture_midi()`
 - [ ] **Groove pool** — apply groove templates to clips
 - [ ] **Cross-fader** — control crossfader assignment and position
-
-## Priority Order
-
-1. **Phase 1** (Recording Accuracy) — makes arrangement recording production-ready
-2. **Phase 2** (CRUD) — needed for iterating without accumulating dead clips/tracks
-3. **Phase 3** (Mixing & Routing) — send levels and routing for complex mixes
-4. **Phase 4** (Automation) — adds movement and expression to arrangements
-5. **Phase 5** (Advanced) — polish and convenience
+- [ ] **Arrangement automation** — Currently automation only applies to session clips and gets baked in during recording. Direct arrangement envelope editing would require M4L.
