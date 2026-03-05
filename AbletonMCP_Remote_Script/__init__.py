@@ -226,10 +226,15 @@ class AbletonMCP(ControlSurface):
                 track_index = params.get("track_index", 0)
                 response["result"] = self._get_track_info(track_index)
             # Commands that modify Live's state should be scheduled on the main thread
-            elif command_type in ["create_midi_track", "set_track_name", 
-                                 "create_clip", "add_notes_to_clip", "set_clip_name", 
+            elif command_type == "get_device_parameters":
+                track_index = params.get("track_index", 0)
+                device_index = params.get("device_index", 0)
+                response["result"] = self._get_device_parameters(track_index, device_index)
+            elif command_type in ["create_midi_track", "set_track_name",
+                                 "create_clip", "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item"]:
+                                 "start_playback", "stop_playback", "load_browser_item",
+                                 "set_device_parameter", "batch_set_device_parameters"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -282,7 +287,19 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             item_uri = params.get("item_uri", "")
                             result = self._load_browser_item(track_index, item_uri)
-                        
+                        elif command_type == "set_device_parameter":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            parameter_index = params.get("parameter_index", 0)
+                            value = params.get("value", 0.0)
+                            result = self._set_device_parameter(track_index, device_index, parameter_index, value)
+                        elif command_type == "batch_set_device_parameters":
+                            track_index = params.get("track_index", 0)
+                            device_index = params.get("device_index", 0)
+                            parameter_indices = params.get("parameter_indices", [])
+                            values = params.get("values", [])
+                            result = self._batch_set_device_parameters(track_index, device_index, parameter_indices, values)
+
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
                     except Exception as e:
@@ -414,6 +431,102 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error getting track info: " + str(e))
             raise
     
+    def _get_device_parameters(self, track_index, device_index):
+        """Get all parameters of a device on a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            device = track.devices[device_index]
+            parameters = []
+            for i, p in enumerate(device.parameters):
+                norm_val = 0
+                if (p.max - p.min) != 0:
+                    norm_val = (p.value - p.min) / (p.max - p.min)
+                parameters.append({
+                    "index": i,
+                    "name": p.name,
+                    "value": p.value,
+                    "normalized_value": norm_val,
+                    "min": p.min,
+                    "max": p.max,
+                    "is_quantized": p.is_quantized,
+                    "is_enabled": p.is_enabled
+                })
+            return {
+                "track_index": track_index,
+                "track_name": track.name,
+                "device_index": device_index,
+                "device_name": device.name,
+                "parameters": parameters
+            }
+        except Exception as e:
+            self.log_message("Error getting device parameters: " + str(e))
+            raise
+
+    def _set_device_parameter(self, track_index, device_index, parameter_index, value):
+        """Set a single device parameter using a normalized value (0.0 to 1.0)"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            device = track.devices[device_index]
+            if parameter_index < 0 or parameter_index >= len(device.parameters):
+                raise IndexError("Parameter index out of range")
+            parameter = device.parameters[parameter_index]
+            if value < 0.0 or value > 1.0:
+                raise ValueError("Normalized value must be between 0.0 and 1.0")
+            actual_value = parameter.min + value * (parameter.max - parameter.min)
+            parameter.value = actual_value
+            return {
+                "parameter_name": parameter.name,
+                "value": parameter.value,
+                "normalized_value": value
+            }
+        except Exception as e:
+            self.log_message("Error setting device parameter: " + str(e))
+            raise
+
+    def _batch_set_device_parameters(self, track_index, device_index, parameter_indices, values):
+        """Set multiple device parameters at once using normalized values (0.0 to 1.0)"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track = self._song.tracks[track_index]
+            if device_index < 0 or device_index >= len(track.devices):
+                raise IndexError("Device index out of range")
+            device = track.devices[device_index]
+            if len(parameter_indices) != len(values):
+                raise ValueError("parameter_indices and values must have the same length")
+            updated = []
+            for i in range(len(parameter_indices)):
+                p_idx = parameter_indices[i]
+                val = values[i]
+                if p_idx < 0 or p_idx >= len(device.parameters):
+                    continue
+                if val < 0.0 or val > 1.0:
+                    continue
+                param = device.parameters[p_idx]
+                actual_val = param.min + val * (param.max - param.min)
+                param.value = actual_val
+                updated.append({
+                    "index": p_idx,
+                    "name": param.name,
+                    "value": param.value,
+                    "normalized_value": val
+                })
+            return {
+                "updated_count": len(updated),
+                "parameters": updated
+            }
+        except Exception as e:
+            self.log_message("Error batch setting device parameters: " + str(e))
+            raise
+
     def _create_midi_track(self, index):
         """Create a new MIDI track at the specified index"""
         try:

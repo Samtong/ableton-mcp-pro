@@ -105,6 +105,7 @@ class AbletonConnection:
             "create_midi_track", "create_audio_track", "set_track_name",
             "create_clip", "add_notes_to_clip", "set_clip_name",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
+            "batch_set_device_parameters",
             "start_playback", "stop_playback", "load_instrument_or_effect"
         ]
         
@@ -406,6 +407,81 @@ def set_tempo(ctx: Context, tempo: float) -> str:
         logger.error(f"Error setting tempo: {str(e)}")
         return f"Error setting tempo: {str(e)}"
 
+
+@mcp.tool()
+def get_device_parameters(ctx: Context, track_index: int, device_index: int) -> str:
+    """
+    Get all parameters of a device on a track, including their current values and ranges.
+
+    Parameters:
+    - track_index: The index of the track containing the device
+    - device_index: The index of the device on the track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_device_parameters", {
+            "track_index": track_index,
+            "device_index": device_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting device parameters: {str(e)}")
+        return f"Error getting device parameters: {str(e)}"
+
+@mcp.tool()
+def set_device_parameter(ctx: Context, track_index: int, device_index: int, parameter_index: int, value: float) -> str:
+    """
+    Set a device parameter using a normalized value (0.0 to 1.0).
+    Use get_device_parameters first to see available parameters and their indices.
+
+    Parameters:
+    - track_index: The index of the track containing the device
+    - device_index: The index of the device on the track
+    - parameter_index: The index of the parameter to set
+    - value: Normalized value between 0.0 and 1.0
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_device_parameter", {
+            "track_index": track_index,
+            "device_index": device_index,
+            "parameter_index": parameter_index,
+            "value": value
+        })
+        param_name = result.get("parameter_name", "unknown")
+        actual_value = result.get("value", value)
+        return f"Set '{param_name}' to {actual_value} (normalized: {value})"
+    except Exception as e:
+        logger.error(f"Error setting device parameter: {str(e)}")
+        return f"Error setting device parameter: {str(e)}"
+
+@mcp.tool()
+def batch_set_device_parameters(ctx: Context, track_index: int, device_index: int, parameter_indices: List[int], values: List[float]) -> str:
+    """
+    Set multiple device parameters at once using normalized values (0.0 to 1.0).
+    Use get_device_parameters first to see available parameters and their indices.
+
+    Parameters:
+    - track_index: The index of the track containing the device
+    - device_index: The index of the device on the track
+    - parameter_indices: List of parameter indices to set
+    - values: List of normalized values (0.0 to 1.0), must match length of parameter_indices
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("batch_set_device_parameters", {
+            "track_index": track_index,
+            "device_index": device_index,
+            "parameter_indices": parameter_indices,
+            "values": values
+        })
+        updated_count = result.get("updated_count", 0)
+        params = result.get("parameters", [])
+        details = ", ".join([f"{p['name']}={p['value']:.2f}" for p in params])
+        return f"Updated {updated_count} parameters: {details}"
+    except Exception as e:
+        logger.error(f"Error batch setting device parameters: {str(e)}")
+        return f"Error batch setting device parameters: {str(e)}"
 
 @mcp.tool()
 def load_instrument_or_effect(ctx: Context, track_index: int, uri: str) -> str:
