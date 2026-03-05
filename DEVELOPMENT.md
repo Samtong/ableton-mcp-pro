@@ -231,6 +231,122 @@ Notes are added with `add_notes_to_clip`:
 
 DS instruments (DS Kick, DS Snare, etc.) respond to any MIDI note — pitch 60 works fine for triggering them.
 
+## Arrangement Recording
+
+The LOM does NOT support creating arrangement clips directly — they are read-only. The only way to build an arrangement is to **record session clips into the arrangement**.
+
+### Available Commands
+
+- `get_arrangement_info()` — read song time, record mode, loop, transport state, song length
+- `set_song_time(time)` — seek to a position in beats
+- `set_record_mode(on)` — enable/disable arrangement recording
+- `set_arrangement_overdub(on)` — layer recordings on existing arrangement
+- `set_back_to_arranger()` — return playback to arrangement from session
+- `set_arrangement_loop(on, start, length)` — control arrangement loop
+- `fire_scene(scene_index)` — launch all clips in a scene at once
+
+### Scene-Based Recording Workflow (Recommended)
+
+The best approach for building arrangements is to organize clips into scenes, then fire scenes at timed intervals while recording:
+
+1. **Set up scenes** — each scene represents a section of the arrangement. Place clips only on the tracks that should play in that section. Empty slots act as stop buttons.
+
+   | Scene | Section | Active Tracks |
+   |-------|---------|--------------|
+   | 0 | Intro | Kick |
+   | 1 | Buildup | Kick, Bass, Hi-Hat |
+   | 2 | Breakdown | Kick, Bass, Chords, Snare, Hi-Hat |
+   | 3 | Drop | All |
+   | 4 | Outro | Kick, Hi-Hat, Clap |
+
+2. **Use `duplicate_clip`** to copy the same clip pattern into multiple scene rows. Use `delete_clip` to clean up unused clips.
+
+3. **Record the arrangement:**
+   ```
+   stop_playback()
+   set_back_to_arranger()
+   set_song_time(0)              # seek to start
+   set_record_mode(True)         # enable recording
+   fire_scene(0)                 # intro — kick only
+   sleep(14.8)                   # wait 8 bars (at 130 BPM: 8 * 4 * 60/130 = 14.77s)
+   fire_scene(1)                 # buildup
+   sleep(14.8)                   # wait 8 bars
+   fire_scene(2)                 # breakdown
+   sleep(14.8)                   # wait 8 bars
+   fire_scene(3)                 # drop
+   sleep(29.5)                   # wait 16 bars
+   fire_scene(4)                 # outro
+   sleep(14.8)                   # wait 8 bars
+   set_record_mode(False)        # stop recording
+   stop_playback()
+   ```
+
+4. **Play back the arrangement:**
+   ```
+   set_back_to_arranger()        # switch to arrangement playback
+   set_song_time(0)              # seek to start
+   start_playback()
+   ```
+
+### Why NOT to Use Muting
+
+Do NOT use `set_track_mute` during recording to create sections. Muting silences the output but **clips are still recorded into the arrangement on all tracks**. You end up with a flat arrangement where every track has clips the whole time. Scene-based recording creates proper clip boundaries — tracks only have arrangement clips where they were actually playing.
+
+### Session Clip Management
+
+- `delete_clip(track_index, clip_index)` — remove a clip from a slot
+- `duplicate_clip(track_index, clip_index, target_index)` — copy a clip to another slot (use `-1` to auto-find next empty slot)
+- `set_track_mute(track_index, mute)` / `set_track_solo(track_index, solo)` — for auditioning during composition
+
+### Erasing Arrangement Content
+
+There's no API to delete arrangement clips. To erase leftover content, record an empty scene (one with no clips) over the section you want to clear:
+```
+set_song_time(192)              # seek to where you want to erase from
+set_record_mode(True)
+fire_scene(0)                   # scene 0 has no clips — records silence
+sleep(20)                       # cover the leftover duration
+set_record_mode(False)
+stop_playback()
+```
+
+## Known Issues & Gaps
+
+### `set_song_time` Unreliable Seeking
+
+`set_song_time(time)` often doesn't land at the requested position on the first call. Observed behaviors:
+- Returns a different time than requested (e.g., ask for 192, get 160)
+- Sometimes needs 2-3 calls to reach the target
+- More reliable after calling `set_back_to_arranger()` first and when playback is stopped
+- **Workaround**: Call `set_back_to_arranger()` first, then call `set_song_time()` twice if the first call doesn't land correctly.
+
+### `set_record_mode` Return Value Inverted
+
+The return message says "disabled" when recording actually starts, and "enabled" when it stops. The actual `record_mode` property is correct — just the MCP server's response string is inverted. Check `get_arrangement_info()` to verify the actual state.
+
+### Scene Count is Fixed
+
+Ableton only has as many scene rows as currently exist (typically 8). `create_clip` at a higher slot index fails with "Clip index out of range". A `create_scene` command is needed to add more rows.
+
+### No Arrangement Clip Deletion
+
+Cannot delete or trim individual arrangement clips via the API. Only workaround is recording silence over them.
+
+### Recording Timing is Approximate
+
+Sleep-based timing for section transitions isn't sample-accurate. Scene fires happen whenever the MCP command arrives, not quantized to bar boundaries. This can cause:
+- Sections that are slightly longer/shorter than intended
+- Transition points that don't align perfectly with bar lines
+- **Future improvement**: Add a `fire_scene_at_time` command that schedules a scene fire at a specific song time, or use clip quantization settings.
+
+### No Way to Read Arrangement Clips
+
+Can read session clips but cannot enumerate what's in the arrangement timeline. `get_arrangement_info()` only returns transport state, not clip content.
+
+### Limited Scene Slots
+
+Only 8 scene rows by default. Need to implement `create_scene(index)` to add more. This limits complex arrangements that need many distinct sections.
+
 ## Common Gotchas
 
 1. **Silent `cp` failure**: Always `rm` then `cp` when updating the Remote Script in the app bundle.
@@ -239,3 +355,6 @@ DS instruments (DS Kick, DS Snare, etc.) respond to any MIDI note — pitch 60 w
 4. **Clip slot occupied**: Can't overwrite clips — use a new slot index.
 5. **Thread safety**: Never modify Ableton state from the socket thread — schedule it on the main thread.
 6. **Parameter ranges**: Always use normalized 0.0–1.0 values, not the raw parameter ranges.
+7. **Muting ≠ not recording**: Muted tracks still record into arrangement. Use scene-based recording instead.
+8. **`set_song_time` needs multiple calls**: Often doesn't seek correctly on first try. Call `set_back_to_arranger()` first.
+9. **Session clips keep playing**: After arrangement recording, session clips may still be active. Call `set_back_to_arranger()` to return to arrangement playback.

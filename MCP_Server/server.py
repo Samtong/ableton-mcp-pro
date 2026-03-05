@@ -107,7 +107,12 @@ class AbletonConnection:
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
             "batch_set_device_parameters",
             "start_playback", "stop_playback", "load_instrument_or_effect",
-            "load_browser_item", "set_track_volume", "set_track_panning"
+            "load_browser_item", "set_track_volume", "set_track_panning",
+            "fire_scene", "set_song_time", "set_record_mode",
+            "set_arrangement_overdub", "set_back_to_arranger",
+            "set_arrangement_loop",
+            "set_track_mute", "set_track_solo",
+            "delete_clip", "duplicate_clip"
         ]
         
         try:
@@ -773,6 +778,217 @@ def set_track_panning(ctx: Context, track_index: int, panning: float) -> str:
     except Exception as e:
         logger.error(f"Error setting track panning: {str(e)}")
         return f"Error setting track panning: {str(e)}"
+
+@mcp.tool()
+def get_arrangement_info(ctx: Context) -> str:
+    """Get current arrangement state including song time, record mode, loop settings, and transport status."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_arrangement_info")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting arrangement info: {str(e)}")
+        return f"Error getting arrangement info: {str(e)}"
+
+@mcp.tool()
+def fire_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Fire (launch) all clips in a scene at once.
+
+    Parameters:
+    - scene_index: The index of the scene to fire
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("fire_scene", {
+            "scene_index": scene_index
+        })
+        scene_name = result.get("scene_name", "")
+        return f"Fired scene {scene_index}" + (f" ({scene_name})" if scene_name else "")
+    except Exception as e:
+        logger.error(f"Error firing scene: {str(e)}")
+        return f"Error firing scene: {str(e)}"
+
+@mcp.tool()
+def set_song_time(ctx: Context, time: float) -> str:
+    """
+    Set the current song time (arrangement playback position) in beats.
+
+    Parameters:
+    - time: Position in beats (0.0 = start, 4.0 = bar 2, etc.)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_song_time", {
+            "time": time
+        })
+        return f"Set song time to {result.get('current_song_time', time):.1f} beats"
+    except Exception as e:
+        logger.error(f"Error setting song time: {str(e)}")
+        return f"Error setting song time: {str(e)}"
+
+@mcp.tool()
+def set_record_mode(ctx: Context, on: bool) -> str:
+    """
+    Enable or disable arrangement recording.
+    When enabled, session clip playback is recorded into the arrangement.
+
+    Parameters:
+    - on: True to start recording, False to stop
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_record_mode", {
+            "on": on
+        })
+        state = "enabled" if on else "disabled"
+        return f"Arrangement recording {state}"
+    except Exception as e:
+        logger.error(f"Error setting record mode: {str(e)}")
+        return f"Error setting record mode: {str(e)}"
+
+@mcp.tool()
+def set_arrangement_overdub(ctx: Context, on: bool) -> str:
+    """
+    Enable or disable arrangement overdub.
+    When enabled, new recordings are layered on top of existing arrangement clips.
+
+    Parameters:
+    - on: True to enable overdub, False to disable
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_arrangement_overdub", {
+            "on": on
+        })
+        state = "enabled" if result.get("arrangement_overdub") else "disabled"
+        return f"Arrangement overdub {state}"
+    except Exception as e:
+        logger.error(f"Error setting arrangement overdub: {str(e)}")
+        return f"Error setting arrangement overdub: {str(e)}"
+
+@mcp.tool()
+def set_back_to_arranger(ctx: Context) -> str:
+    """Return playback to the arrangement view from session view."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_back_to_arranger")
+        return "Returned to arrangement"
+    except Exception as e:
+        logger.error(f"Error setting back to arranger: {str(e)}")
+        return f"Error setting back to arranger: {str(e)}"
+
+@mcp.tool()
+def set_arrangement_loop(ctx: Context, on: bool, start: float = 0.0, length: float = 16.0) -> str:
+    """
+    Set arrangement loop on/off, start position and length.
+
+    Parameters:
+    - on: True to enable loop, False to disable
+    - start: Loop start position in beats
+    - length: Loop length in beats (e.g. 16.0 = 4 bars)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_arrangement_loop", {
+            "on": on,
+            "start": start,
+            "length": length
+        })
+        if on:
+            return f"Loop enabled: start={result.get('loop_start', start):.1f}, length={result.get('loop_length', length):.1f} beats"
+        else:
+            return "Loop disabled"
+    except Exception as e:
+        logger.error(f"Error setting arrangement loop: {str(e)}")
+        return f"Error setting arrangement loop: {str(e)}"
+
+@mcp.tool()
+def set_track_mute(ctx: Context, track_index: int, mute: bool) -> str:
+    """
+    Mute or unmute a track.
+
+    Parameters:
+    - track_index: The index of the track (-1 for master)
+    - mute: True to mute, False to unmute
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_mute", {
+            "track_index": track_index,
+            "mute": mute
+        })
+        track_name = result.get("track_name", "unknown")
+        state = "muted" if mute else "unmuted"
+        return f"Track '{track_name}' {state}"
+    except Exception as e:
+        logger.error(f"Error setting track mute: {str(e)}")
+        return f"Error setting track mute: {str(e)}"
+
+@mcp.tool()
+def set_track_solo(ctx: Context, track_index: int, solo: bool) -> str:
+    """
+    Solo or unsolo a track.
+
+    Parameters:
+    - track_index: The index of the track
+    - solo: True to solo, False to unsolo
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_solo", {
+            "track_index": track_index,
+            "solo": solo
+        })
+        track_name = result.get("track_name", "unknown")
+        state = "soloed" if solo else "unsoloed"
+        return f"Track '{track_name}' {state}"
+    except Exception as e:
+        logger.error(f"Error setting track solo: {str(e)}")
+        return f"Error setting track solo: {str(e)}"
+
+@mcp.tool()
+def delete_clip(ctx: Context, track_index: int, clip_index: int) -> str:
+    """
+    Delete a clip from a clip slot.
+
+    Parameters:
+    - track_index: The index of the track containing the clip
+    - clip_index: The index of the clip slot
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_clip", {
+            "track_index": track_index,
+            "clip_index": clip_index
+        })
+        return f"Deleted clip at track {track_index}, slot {clip_index}"
+    except Exception as e:
+        logger.error(f"Error deleting clip: {str(e)}")
+        return f"Error deleting clip: {str(e)}"
+
+@mcp.tool()
+def duplicate_clip(ctx: Context, track_index: int, clip_index: int, target_index: int = -1) -> str:
+    """
+    Duplicate a clip to another slot on the same track.
+
+    Parameters:
+    - track_index: The index of the track
+    - clip_index: The source clip slot index
+    - target_index: The target clip slot index (-1 to auto-find next empty slot)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("duplicate_clip", {
+            "track_index": track_index,
+            "clip_index": clip_index,
+            "target_index": target_index
+        })
+        target = result.get("target_index", target_index)
+        return f"Duplicated clip from slot {clip_index} to slot {target} on track {track_index}"
+    except Exception as e:
+        logger.error(f"Error duplicating clip: {str(e)}")
+        return f"Error duplicating clip: {str(e)}"
 
 # Main execution
 def main():

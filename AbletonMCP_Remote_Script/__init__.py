@@ -230,13 +230,20 @@ class AbletonMCP(ControlSurface):
                 track_index = params.get("track_index", 0)
                 device_index = params.get("device_index", 0)
                 response["result"] = self._get_device_parameters(track_index, device_index)
+            elif command_type == "get_arrangement_info":
+                response["result"] = self._get_arrangement_info()
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "load_browser_item",
                                  "load_instrument_or_effect",
                                  "set_device_parameter", "batch_set_device_parameters",
-                                 "set_track_volume", "set_track_panning"]:
+                                 "set_track_volume", "set_track_panning",
+                                 "fire_scene", "set_song_time", "set_record_mode",
+                                 "set_arrangement_overdub", "set_back_to_arranger",
+                                 "set_arrangement_loop",
+                                 "set_track_mute", "set_track_solo",
+                                 "delete_clip", "duplicate_clip"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -309,6 +316,42 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             panning = params.get("panning", 0.0)
                             result = self._set_track_panning(track_index, panning)
+                        elif command_type == "fire_scene":
+                            scene_index = params.get("scene_index", 0)
+                            result = self._fire_scene(scene_index)
+                        elif command_type == "set_song_time":
+                            time = params.get("time", 0.0)
+                            result = self._set_song_time(time)
+                        elif command_type == "set_record_mode":
+                            on = params.get("on", False)
+                            result = self._set_record_mode(on)
+                        elif command_type == "set_arrangement_overdub":
+                            on = params.get("on", False)
+                            result = self._set_arrangement_overdub(on)
+                        elif command_type == "set_back_to_arranger":
+                            result = self._set_back_to_arranger()
+                        elif command_type == "set_arrangement_loop":
+                            on = params.get("on", True)
+                            start = params.get("start", 0.0)
+                            length = params.get("length", 16.0)
+                            result = self._set_arrangement_loop(on, start, length)
+                        elif command_type == "set_track_mute":
+                            track_index = params.get("track_index", 0)
+                            mute = params.get("mute", False)
+                            result = self._set_track_mute(track_index, mute)
+                        elif command_type == "set_track_solo":
+                            track_index = params.get("track_index", 0)
+                            solo = params.get("solo", False)
+                            result = self._set_track_solo(track_index, solo)
+                        elif command_type == "delete_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            result = self._delete_clip(track_index, clip_index)
+                        elif command_type == "duplicate_clip":
+                            track_index = params.get("track_index", 0)
+                            clip_index = params.get("clip_index", 0)
+                            target_index = params.get("target_index", -1)
+                            result = self._duplicate_clip(track_index, clip_index, target_index)
 
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -489,6 +532,180 @@ class AbletonMCP(ControlSurface):
             }
         except Exception as e:
             self.log_message("Error setting track panning: " + str(e))
+            raise
+
+    def _get_arrangement_info(self):
+        """Get current arrangement state"""
+        try:
+            return {
+                "current_song_time": self._song.current_song_time,
+                "is_playing": self._song.is_playing,
+                "record_mode": self._song.record_mode,
+                "arrangement_overdub": self._song.arrangement_overdub,
+                "back_to_arranger": self._song.back_to_arranger,
+                "loop": self._song.loop,
+                "loop_start": self._song.loop_start,
+                "loop_length": self._song.loop_length,
+                "tempo": self._song.tempo,
+                "scene_count": len(self._song.scenes),
+                "song_length": self._song.song_length
+            }
+        except Exception as e:
+            self.log_message("Error getting arrangement info: " + str(e))
+            raise
+
+    def _fire_scene(self, scene_index):
+        """Fire all clips in a scene"""
+        try:
+            if scene_index < 0 or scene_index >= len(self._song.scenes):
+                raise IndexError("Scene index out of range (0-{0})".format(len(self._song.scenes) - 1))
+            scene = self._song.scenes[scene_index]
+            scene.fire()
+            return {
+                "scene_index": scene_index,
+                "scene_name": scene.name,
+                "fired": True
+            }
+        except Exception as e:
+            self.log_message("Error firing scene: " + str(e))
+            raise
+
+    def _set_song_time(self, time):
+        """Set the current song time (arrangement position) in beats"""
+        try:
+            self._song.current_song_time = max(0.0, time)
+            return {
+                "current_song_time": self._song.current_song_time
+            }
+        except Exception as e:
+            self.log_message("Error setting song time: " + str(e))
+            raise
+
+    def _set_record_mode(self, on):
+        """Enable or disable arrangement recording"""
+        try:
+            self._song.record_mode = 1 if on else 0
+            return {
+                "record_mode": self._song.record_mode
+            }
+        except Exception as e:
+            self.log_message("Error setting record mode: " + str(e))
+            raise
+
+    def _set_arrangement_overdub(self, on):
+        """Enable or disable arrangement overdub"""
+        try:
+            self._song.arrangement_overdub = 1 if on else 0
+            return {
+                "arrangement_overdub": self._song.arrangement_overdub
+            }
+        except Exception as e:
+            self.log_message("Error setting arrangement overdub: " + str(e))
+            raise
+
+    def _set_back_to_arranger(self):
+        """Return to arrangement view from session"""
+        try:
+            self._song.back_to_arranger = True
+            return {
+                "back_to_arranger": True
+            }
+        except Exception as e:
+            self.log_message("Error setting back to arranger: " + str(e))
+            raise
+
+    def _set_arrangement_loop(self, on, start, length):
+        """Set arrangement loop on/off, start position and length in beats"""
+        try:
+            self._song.loop = on
+            if start is not None:
+                self._song.loop_start = max(0.0, start)
+            if length is not None:
+                self._song.loop_length = max(0.0, length)
+            return {
+                "loop": self._song.loop,
+                "loop_start": self._song.loop_start,
+                "loop_length": self._song.loop_length
+            }
+        except Exception as e:
+            self.log_message("Error setting arrangement loop: " + str(e))
+            raise
+
+    def _set_track_mute(self, track_index, mute):
+        """Mute or unmute a track"""
+        try:
+            track = self._get_track(track_index)
+            track.mute = mute
+            return {
+                "track_name": track.name,
+                "mute": track.mute
+            }
+        except Exception as e:
+            self.log_message("Error setting track mute: " + str(e))
+            raise
+
+    def _set_track_solo(self, track_index, solo):
+        """Solo or unsolo a track"""
+        try:
+            track = self._get_track(track_index)
+            track.solo = solo
+            return {
+                "track_name": track.name,
+                "solo": track.solo
+            }
+        except Exception as e:
+            self.log_message("Error setting track solo: " + str(e))
+            raise
+
+    def _delete_clip(self, track_index, clip_index):
+        """Delete a clip from a clip slot"""
+        try:
+            track = self._get_track(track_index)
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Clip index out of range")
+            clip_slot = track.clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                raise ValueError("No clip in slot {0}".format(clip_index))
+            clip_slot.delete_clip()
+            return {
+                "track_name": track.name,
+                "clip_index": clip_index,
+                "deleted": True
+            }
+        except Exception as e:
+            self.log_message("Error deleting clip: " + str(e))
+            raise
+
+    def _duplicate_clip(self, track_index, clip_index, target_index):
+        """Duplicate a clip to another slot"""
+        try:
+            track = self._get_track(track_index)
+            if clip_index < 0 or clip_index >= len(track.clip_slots):
+                raise IndexError("Source clip index out of range")
+            if not track.clip_slots[clip_index].has_clip:
+                raise ValueError("No clip in source slot {0}".format(clip_index))
+            if target_index < 0:
+                # Find next empty slot
+                target_index = -1
+                for i in range(len(track.clip_slots)):
+                    if not track.clip_slots[i].has_clip:
+                        target_index = i
+                        break
+                if target_index < 0:
+                    raise ValueError("No empty clip slots available")
+            if target_index >= len(track.clip_slots):
+                raise IndexError("Target clip index out of range")
+            if track.clip_slots[target_index].has_clip:
+                raise ValueError("Target slot {0} already has a clip".format(target_index))
+            track.clip_slots[clip_index].duplicate_clip_to(track.clip_slots[target_index])
+            return {
+                "track_name": track.name,
+                "source_index": clip_index,
+                "target_index": target_index,
+                "duplicated": True
+            }
+        except Exception as e:
+            self.log_message("Error duplicating clip: " + str(e))
             raise
 
     def _get_device_parameters(self, track_index, device_index):
