@@ -310,42 +310,70 @@ set_record_mode(False)
 stop_playback()
 ```
 
+## Scene Management
+
+- `create_scene(index)` — create a new scene row. Use `-1` to append at end.
+- `delete_scene(scene_index)` — delete a scene row.
+- `set_scene_name(scene_index, name)` — label scenes (e.g., "Intro", "Drop", "Outro").
+
+## Track Management
+
+- `create_audio_track(index)` — create an audio track. Use `-1` to append at end.
+- `delete_track(track_index)` — remove a track.
+
+## Reading the Arrangement
+
+- `get_arrangement_clips(track_index)` — get clips for a single track.
+- `get_full_arrangement()` — get all tracks with clips, scenes, tempo, time signature, and song length in one call. Only returns tracks that have arrangement clips.
+
+## High-Level Recording: `record_arrangement`
+
+The `record_arrangement(sections)` command handles the entire recording workflow in a single call:
+
+```python
+record_arrangement([
+    {"scene_index": 0, "bars": 8},   # Intro
+    {"scene_index": 1, "bars": 8},   # Buildup
+    {"scene_index": 2, "bars": 8},   # Breakdown
+    {"scene_index": 3, "bars": 16},  # Drop
+    {"scene_index": 4, "bars": 8},   # Outro
+])
+```
+
+It automatically: stops playback, seeks to beat 0, enables recording, fires each scene in sequence with correct timing, then stops recording and playback.
+
+### Threading Architecture
+
+`record_arrangement` runs differently from other commands:
+- It executes on the **socket thread** (not main thread) to avoid deadlocks
+- Timing (`time.sleep`) runs on a **background thread** so Ableton's UI stays responsive
+- Ableton operations (fire scene, set record mode) are dispatched to the **main thread** via `schedule_message(0, task)` with `threading.Event` synchronization
+- The MCP server uses a 600s timeout for this command (vs 10-15s for normal commands)
+
+### Stale `self._song` Reference
+
+The cached `self._song = self.song()` reference becomes invalid when Ableton swaps the song document (e.g., during restart or loading a new project). The C++ signature error `None.None(Song) did not match C++ signature: None(TPyHandle<ASong>)` is the symptom. Fix: refresh `self._song = self.song()` at the start of `_process_command`.
+
 ## Known Issues & Gaps
 
 ### `set_song_time` Unreliable Seeking
 
-`set_song_time(time)` often doesn't land at the requested position on the first call. Observed behaviors:
-- Returns a different time than requested (e.g., ask for 192, get 160)
-- Sometimes needs 2-3 calls to reach the target
-- More reliable after calling `set_back_to_arranger()` first and when playback is stopped
-- **Workaround**: Call `set_back_to_arranger()` first, then call `set_song_time()` twice if the first call doesn't land correctly.
-
-### `set_record_mode` Return Value Inverted
-
-The return message says "disabled" when recording actually starts, and "enabled" when it stops. The actual `record_mode` property is correct — just the MCP server's response string is inverted. Check `get_arrangement_info()` to verify the actual state.
-
-### Scene Count is Fixed
-
-Ableton only has as many scene rows as currently exist (typically 8). `create_clip` at a higher slot index fails with "Clip index out of range". A `create_scene` command is needed to add more rows.
+`set_song_time(time)` often doesn't land at the requested position on the first call. The Remote Script now retries up to 5 times with a tolerance of 0.5 beats. Still sometimes needs `set_back_to_arranger()` called first.
 
 ### No Arrangement Clip Deletion
 
-Cannot delete or trim individual arrangement clips via the API. Only workaround is recording silence over them.
+Cannot delete or trim individual arrangement clips via the API. Only workaround is recording an empty scene (no clips) over the section to erase it.
 
 ### Recording Timing is Approximate
 
-Sleep-based timing for section transitions isn't sample-accurate. Scene fires happen whenever the MCP command arrives, not quantized to bar boundaries. This can cause:
-- Sections that are slightly longer/shorter than intended
-- Transition points that don't align perfectly with bar lines
-- **Future improvement**: Add a `fire_scene_at_time` command that schedules a scene fire at a specific song time, or use clip quantization settings.
+`time.sleep`-based timing isn't sample-accurate. Section transitions may drift by 1-2 beats over long recordings. Observed ~1.6 beat drift after 48 bars at 130 BPM. Potential improvements:
+- Use `song.current_song_time` polling instead of `time.sleep` for more accurate timing
+- Add a `fire_scene_at_time` command that waits for a specific beat position
+- Use clip trigger quantization settings in Ableton
 
-### No Way to Read Arrangement Clips
+### Arrangement Clips Are Read-Only
 
-Can read session clips but cannot enumerate what's in the arrangement timeline. `get_arrangement_info()` only returns transport state, not clip content.
-
-### Limited Scene Slots
-
-Only 8 scene rows by default. Need to implement `create_scene(index)` to add more. This limits complex arrangements that need many distinct sections.
+The LOM only supports reading arrangement clips, not creating/modifying/deleting them. The only way to build an arrangement is recording from session view. The only way to erase is recording silence.
 
 ## Common Gotchas
 
@@ -353,8 +381,10 @@ Only 8 scene rows by default. Need to implement `create_scene(index)` to add mor
 2. **Stale `__pycache__`**: Always delete it after updating the script.
 3. **Script not reloading**: Toggle in Preferences doesn't work — full Ableton restart required.
 4. **Clip slot occupied**: Can't overwrite clips — use a new slot index.
-5. **Thread safety**: Never modify Ableton state from the socket thread — schedule it on the main thread.
+5. **Thread safety**: Never modify Ableton state from the socket thread — schedule it on the main thread. Exception: `record_arrangement` manages its own threading.
 6. **Parameter ranges**: Always use normalized 0.0–1.0 values, not the raw parameter ranges.
 7. **Muting ≠ not recording**: Muted tracks still record into arrangement. Use scene-based recording instead.
-8. **`set_song_time` needs multiple calls**: Often doesn't seek correctly on first try. Call `set_back_to_arranger()` first.
-9. **Session clips keep playing**: After arrangement recording, session clips may still be active. Call `set_back_to_arranger()` to return to arrangement playback.
+8. **`set_song_time` needs multiple calls**: Retry loop in Remote Script handles this, but sometimes still needs `set_back_to_arranger()` first.
+9. **Session clips keep playing**: After arrangement recording, call `set_back_to_arranger()` to return to arrangement playback.
+10. **Stale `self._song`**: Refreshed at start of every `_process_command`. Symptom: C++ signature mismatch error.
+11. **`receive_full_response` timeout override**: Don't hardcode timeouts in `receive_full_response` — let `send_command` set the socket timeout based on command type.

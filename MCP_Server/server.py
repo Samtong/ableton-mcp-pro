@@ -44,9 +44,9 @@ class AbletonConnection:
                 self.sock = None
 
     def receive_full_response(self, sock, buffer_size=8192):
-        """Receive the complete response, potentially in multiple chunks"""
+        """Receive the complete response, potentially in multiple chunks.
+        Uses whatever timeout is already set on the socket."""
         chunks = []
-        sock.settimeout(15.0)  # Increased timeout for operations that might take longer
         
         try:
             while True:
@@ -112,7 +112,9 @@ class AbletonConnection:
             "set_arrangement_overdub", "set_back_to_arranger",
             "set_arrangement_loop",
             "set_track_mute", "set_track_solo",
-            "delete_clip", "duplicate_clip"
+            "delete_clip", "duplicate_clip",
+            "create_scene", "delete_scene", "set_scene_name",
+            "delete_track", "record_arrangement"
         ]
         
         try:
@@ -128,7 +130,12 @@ class AbletonConnection:
                 time.sleep(0.1)  # 100ms delay
             
             # Set timeout based on command type
-            timeout = 15.0 if is_modifying_command else 10.0
+            if command_type == "record_arrangement":
+                timeout = 600.0  # 10 minutes for arrangement recording
+            elif is_modifying_command:
+                timeout = 15.0
+            else:
+                timeout = 10.0
             self.sock.settimeout(timeout)
             
             # Receive the response
@@ -989,6 +996,157 @@ def duplicate_clip(ctx: Context, track_index: int, clip_index: int, target_index
     except Exception as e:
         logger.error(f"Error duplicating clip: {str(e)}")
         return f"Error duplicating clip: {str(e)}"
+
+@mcp.tool()
+def create_scene(ctx: Context, index: int = -1) -> str:
+    """
+    Create a new scene at the specified index.
+
+    Parameters:
+    - index: Position to insert the scene (-1 to add at the end)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_scene", {
+            "index": index
+        })
+        return f"Created scene at index {result.get('scene_index', index)} (total: {result.get('scene_count', '?')} scenes)"
+    except Exception as e:
+        logger.error(f"Error creating scene: {str(e)}")
+        return f"Error creating scene: {str(e)}"
+
+@mcp.tool()
+def set_scene_name(ctx: Context, scene_index: int, name: str) -> str:
+    """
+    Set a scene's name (e.g. "Intro", "Drop", "Outro").
+
+    Parameters:
+    - scene_index: The index of the scene
+    - name: The name to set
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_scene_name", {
+            "scene_index": scene_index,
+            "name": name
+        })
+        return f"Set scene {scene_index} name to '{result.get('name', name)}'"
+    except Exception as e:
+        logger.error(f"Error setting scene name: {str(e)}")
+        return f"Error setting scene name: {str(e)}"
+
+@mcp.tool()
+def create_audio_track(ctx: Context, index: int = -1) -> str:
+    """
+    Create a new audio track at the specified index.
+
+    Parameters:
+    - index: Position to insert the track (-1 to add at the end)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("create_audio_track", {
+            "index": index
+        })
+        return f"Created audio track '{result.get('name', '')}' at index {result.get('index', index)}"
+    except Exception as e:
+        logger.error(f"Error creating audio track: {str(e)}")
+        return f"Error creating audio track: {str(e)}"
+
+@mcp.tool()
+def delete_track(ctx: Context, track_index: int) -> str:
+    """
+    Delete a track.
+
+    Parameters:
+    - track_index: The index of the track to delete
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_track", {
+            "track_index": track_index
+        })
+        return f"Deleted track '{result.get('deleted_track', '')}' (remaining: {result.get('track_count', '?')} tracks)"
+    except Exception as e:
+        logger.error(f"Error deleting track: {str(e)}")
+        return f"Error deleting track: {str(e)}"
+
+@mcp.tool()
+def get_arrangement_clips(ctx: Context, track_index: int) -> str:
+    """
+    Get arrangement clips for a track. Shows what clips are in the arrangement timeline.
+    Use track_index -1 for master track.
+
+    Parameters:
+    - track_index: The index of the track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_arrangement_clips", {
+            "track_index": track_index
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting arrangement clips: {str(e)}")
+        return f"Error getting arrangement clips: {str(e)}"
+
+@mcp.tool()
+def record_arrangement(ctx: Context, sections: List[dict]) -> str:
+    """
+    Record session clips into the arrangement by firing scenes at timed intervals.
+    This runs inside Ableton for precise timing. Handles seeking, recording, and stopping automatically.
+
+    Parameters:
+    - sections: List of {"scene_index": int, "bars": int} defining each section.
+                Example: [{"scene_index": 0, "bars": 8}, {"scene_index": 1, "bars": 8}, {"scene_index": 2, "bars": 16}]
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("record_arrangement", {
+            "sections": sections
+        })
+        total_bars = result.get("total_bars", 0)
+        tempo = result.get("tempo", 120)
+        recorded = result.get("sections", [])
+        summary = []
+        for s in recorded:
+            summary.append(f"  Bars {s['start_bar']}-{s['end_bar']}: Scene {s['scene_index']} ({s['scene_name']}) [{s['bars']} bars]")
+        return f"Recorded {total_bars} bars at {tempo} BPM:\n" + "\n".join(summary)
+    except Exception as e:
+        logger.error(f"Error recording arrangement: {str(e)}")
+        return f"Error recording arrangement: {str(e)}"
+
+@mcp.tool()
+def get_full_arrangement(ctx: Context) -> str:
+    """
+    Get a complete view of the arrangement — all tracks with their arrangement clips,
+    song tempo, time signature, length, and scene list.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_full_arrangement", {})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting full arrangement: {str(e)}")
+        return f"Error getting full arrangement: {str(e)}"
+
+@mcp.tool()
+def delete_scene(ctx: Context, scene_index: int) -> str:
+    """
+    Delete a scene.
+
+    Parameters:
+    - scene_index: The index of the scene to delete
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_scene", {
+            "scene_index": scene_index
+        })
+        return f"Deleted scene '{result.get('deleted_scene', '')}' (remaining: {result.get('scene_count', '?')} scenes)"
+    except Exception as e:
+        logger.error(f"Error deleting scene: {str(e)}")
+        return f"Error deleting scene: {str(e)}"
 
 # Main execution
 def main():

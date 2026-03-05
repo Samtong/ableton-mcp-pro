@@ -209,6 +209,8 @@ class AbletonMCP(ControlSurface):
     
     def _process_command(self, command):
         """Process a command from the client and return a response"""
+        # Refresh song reference — cached ref can become stale after doc swap
+        self._song = self.song()
         command_type = command.get("type", "")
         params = command.get("params", {})
         
@@ -232,6 +234,15 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._get_device_parameters(track_index, device_index)
             elif command_type == "get_arrangement_info":
                 response["result"] = self._get_arrangement_info()
+            elif command_type == "get_arrangement_clips":
+                track_index = params.get("track_index", 0)
+                response["result"] = self._get_arrangement_clips(track_index)
+            elif command_type == "get_full_arrangement":
+                response["result"] = self._get_full_arrangement()
+            elif command_type == "record_arrangement":
+                # Runs on socket thread with schedule_message for main thread ops
+                sections = params.get("sections", [])
+                response["result"] = self._record_arrangement(sections)
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
@@ -243,7 +254,9 @@ class AbletonMCP(ControlSurface):
                                  "set_arrangement_overdub", "set_back_to_arranger",
                                  "set_arrangement_loop",
                                  "set_track_mute", "set_track_solo",
-                                 "delete_clip", "duplicate_clip"]:
+                                 "delete_clip", "duplicate_clip",
+                                 "create_scene", "delete_scene", "set_scene_name",
+                                 "create_audio_track", "delete_track"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -352,6 +365,22 @@ class AbletonMCP(ControlSurface):
                             clip_index = params.get("clip_index", 0)
                             target_index = params.get("target_index", -1)
                             result = self._duplicate_clip(track_index, clip_index, target_index)
+                        elif command_type == "create_scene":
+                            index = params.get("index", -1)
+                            result = self._create_scene(index)
+                        elif command_type == "delete_scene":
+                            scene_index = params.get("scene_index", 0)
+                            result = self._delete_scene(scene_index)
+                        elif command_type == "set_scene_name":
+                            scene_index = params.get("scene_index", 0)
+                            name = params.get("name", "")
+                            result = self._set_scene_name(scene_index, name)
+                        elif command_type == "create_audio_track":
+                            index = params.get("index", -1)
+                            result = self._create_audio_track(index)
+                        elif command_type == "delete_track":
+                            track_index = params.get("track_index", 0)
+                            result = self._delete_track(track_index)
 
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -369,7 +398,8 @@ class AbletonMCP(ControlSurface):
                 
                 # Wait for the response with a timeout
                 try:
-                    task_response = response_queue.get(timeout=10.0)
+                    cmd_timeout = 300.0 if command_type == "record_arrangement" else 10.0
+                    task_response = response_queue.get(timeout=cmd_timeout)
                     if task_response.get("status") == "error":
                         response["status"] = "error"
                         response["message"] = task_response.get("message", "Unknown error")
@@ -571,9 +601,17 @@ class AbletonMCP(ControlSurface):
             raise
 
     def _set_song_time(self, time):
-        """Set the current song time (arrangement position) in beats"""
+        """Set the current song time (arrangement position) in beats.
+        Retries up to 5 times if the position doesn't land correctly."""
         try:
-            self._song.current_song_time = max(0.0, time)
+            target = max(0.0, time)
+            for attempt in range(5):
+                self._song.current_song_time = target
+                actual = self._song.current_song_time
+                if abs(actual - target) < 0.5:
+                    break
+                self.log_message("set_song_time attempt {0}: wanted {1}, got {2}".format(
+                    attempt + 1, target, actual))
             return {
                 "current_song_time": self._song.current_song_time
             }
@@ -707,6 +745,275 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error duplicating clip: " + str(e))
             raise
+
+    def _create_scene(self, index):
+        """Create a new scene at the specified index"""
+        try:
+            if index < 0:
+                index = len(self._song.scenes)
+            scene = self._song.create_scene(index)
+            return {
+                "scene_index": index,
+                "scene_count": len(self._song.scenes)
+            }
+        except Exception as e:
+            self.log_message("Error creating scene: " + str(e))
+            raise
+
+    def _set_scene_name(self, scene_index, name):
+        """Set a scene's name"""
+        try:
+            if scene_index < 0 or scene_index >= len(self._song.scenes):
+                raise IndexError("Scene index out of range")
+            self._song.scenes[scene_index].name = name
+            return {
+                "scene_index": scene_index,
+                "name": self._song.scenes[scene_index].name
+            }
+        except Exception as e:
+            self.log_message("Error setting scene name: " + str(e))
+            raise
+
+    def _create_audio_track(self, index):
+        """Create a new audio track at the specified index"""
+        try:
+            if index < 0:
+                index = len(self._song.tracks)
+            self._song.create_audio_track(index)
+            track = self._song.tracks[index]
+            return {
+                "index": index,
+                "name": track.name,
+                "track_count": len(self._song.tracks)
+            }
+        except Exception as e:
+            self.log_message("Error creating audio track: " + str(e))
+            raise
+
+    def _delete_track(self, track_index):
+        """Delete a track"""
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+            track_name = self._song.tracks[track_index].name
+            self._song.delete_track(track_index)
+            return {
+                "deleted_track": track_name,
+                "track_count": len(self._song.tracks)
+            }
+        except Exception as e:
+            self.log_message("Error deleting track: " + str(e))
+            raise
+
+    def _get_arrangement_clips(self, track_index):
+        """Get arrangement clips for a track"""
+        try:
+            track = self._get_track(track_index)
+            clips = []
+            if hasattr(track, 'arrangement_clips'):
+                for clip in track.arrangement_clips:
+                    clip_info = {
+                        "name": clip.name,
+                        "start_time": clip.start_time if hasattr(clip, 'start_time') else 0,
+                        "end_time": clip.end_time if hasattr(clip, 'end_time') else 0,
+                        "length": clip.length,
+                        "is_midi_clip": clip.is_midi_clip if hasattr(clip, 'is_midi_clip') else False,
+                        "is_audio_clip": clip.is_audio_clip if hasattr(clip, 'is_audio_clip') else False,
+                    }
+                    clips.append(clip_info)
+            return {
+                "track_index": track_index,
+                "track_name": track.name,
+                "arrangement_clip_count": len(clips),
+                "clips": clips
+            }
+        except Exception as e:
+            self.log_message("Error getting arrangement clips: " + str(e))
+            raise
+
+    def _get_full_arrangement(self):
+        """Get arrangement clips for all tracks at once"""
+        try:
+            tracks_data = []
+            all_tracks = list(self._song.tracks)
+            for i, track in enumerate(all_tracks):
+                clips = []
+                if hasattr(track, 'arrangement_clips'):
+                    for clip in track.arrangement_clips:
+                        clips.append({
+                            "name": clip.name,
+                            "start_time": clip.start_time if hasattr(clip, 'start_time') else 0,
+                            "end_time": clip.end_time if hasattr(clip, 'end_time') else 0,
+                            "length": clip.length,
+                            "is_midi_clip": clip.is_midi_clip if hasattr(clip, 'is_midi_clip') else False,
+                        })
+                if clips:
+                    tracks_data.append({
+                        "track_index": i,
+                        "track_name": track.name,
+                        "clips": clips
+                    })
+
+            # Scene info
+            scenes = []
+            for i, scene in enumerate(self._song.scenes):
+                scenes.append({"index": i, "name": scene.name})
+
+            return {
+                "tempo": self._song.tempo,
+                "time_signature": "{0}/{1}".format(
+                    self._song.signature_numerator,
+                    self._song.signature_denominator),
+                "song_length": self._song.song_length,
+                "tracks_with_clips": tracks_data,
+                "scenes": scenes
+            }
+        except Exception as e:
+            self.log_message("Error getting full arrangement: " + str(e))
+            raise
+
+    def _delete_scene(self, scene_index):
+        """Delete a scene"""
+        try:
+            if scene_index < 0 or scene_index >= len(self._song.scenes):
+                raise IndexError("Scene index out of range")
+            scene_name = self._song.scenes[scene_index].name
+            self._song.delete_scene(scene_index)
+            return {
+                "deleted_scene": scene_name,
+                "scene_count": len(self._song.scenes)
+            }
+        except Exception as e:
+            self.log_message("Error deleting scene: " + str(e))
+            raise
+
+    def _record_arrangement(self, sections):
+        """Record session clips into arrangement by firing scenes at timed intervals.
+        sections: list of {"scene_index": int, "bars": int}
+        Runs timing on a background thread to avoid freezing Ableton's UI.
+        Uses schedule_message to execute Ableton operations on the main thread."""
+        import time as time_module
+
+        tempo = self._song.tempo
+        beats_per_bar = self._song.signature_numerator
+        seconds_per_beat = 60.0 / tempo
+
+        # Result container for the background thread
+        result_holder = {"result": None, "error": None, "done": False}
+
+        def do_on_main(fn):
+            """Execute fn on main thread and wait for completion."""
+            done_event = threading.Event()
+            error_holder = [None]
+            def task():
+                try:
+                    fn()
+                except Exception as e:
+                    error_holder[0] = e
+                done_event.set()
+            self.schedule_message(0, task)
+            done_event.wait(timeout=5.0)
+            if error_holder[0]:
+                raise error_holder[0]
+
+        def recording_thread():
+            try:
+                # Stop playback and prepare (on main thread)
+                do_on_main(lambda: self._song.stop_playing() if self._song.is_playing else None)
+                time_module.sleep(0.1)
+                do_on_main(lambda: setattr(self._song, 'back_to_arranger', True))
+                time_module.sleep(0.05)
+
+                # Seek to start
+                def seek_start():
+                    self._song.current_song_time = 0.0
+                    for _ in range(5):
+                        if abs(self._song.current_song_time) < 0.5:
+                            break
+                        self._song.current_song_time = 0.0
+                do_on_main(seek_start)
+                time_module.sleep(0.05)
+
+                # Enable recording
+                do_on_main(lambda: setattr(self._song, 'record_mode', 1))
+                time_module.sleep(0.05)
+
+                total_bars = 0
+                recorded_sections = []
+
+                for i, section in enumerate(sections):
+                    scene_index = section.get("scene_index", 0)
+                    bars = section.get("bars", 8)
+
+                    scene_count = [0]
+                    def get_scene_count():
+                        scene_count[0] = len(self._song.scenes)
+                    do_on_main(get_scene_count)
+
+                    if scene_index < 0 or scene_index >= scene_count[0]:
+                        self.log_message("Skipping invalid scene index: {0}".format(scene_index))
+                        continue
+
+                    # Fire the scene on main thread
+                    scene_name_holder = [""]
+                    def fire(si=scene_index):
+                        self._song.scenes[si].fire()
+                        scene_name_holder[0] = self._song.scenes[si].name
+                    do_on_main(fire)
+
+                    self.log_message("Recording section {0}: scene {1} ({2}) for {3} bars".format(
+                        i + 1, scene_index, scene_name_holder[0], bars))
+
+                    # Wait for the section duration (on background thread — doesn't block UI)
+                    duration_seconds = bars * beats_per_bar * seconds_per_beat
+                    time_module.sleep(duration_seconds)
+
+                    recorded_sections.append({
+                        "scene_index": scene_index,
+                        "scene_name": scene_name_holder[0],
+                        "bars": bars,
+                        "start_bar": total_bars + 1,
+                        "end_bar": total_bars + bars
+                    })
+                    total_bars += bars
+
+                # Stop recording
+                do_on_main(lambda: setattr(self._song, 'record_mode', 0))
+                time_module.sleep(0.05)
+                do_on_main(lambda: self._song.stop_playing())
+
+                result_holder["result"] = {
+                    "total_bars": total_bars,
+                    "total_beats": total_bars * beats_per_bar,
+                    "sections": recorded_sections,
+                    "tempo": tempo
+                }
+            except Exception as e:
+                # Make sure we stop recording on error
+                try:
+                    do_on_main(lambda: setattr(self._song, 'record_mode', 0))
+                    do_on_main(lambda: self._song.stop_playing())
+                except:
+                    pass
+                self.log_message("Error recording arrangement: " + str(e))
+                result_holder["error"] = e
+            finally:
+                result_holder["done"] = True
+
+        # Start recording on background thread
+        rec_thread = threading.Thread(target=recording_thread)
+        rec_thread.daemon = True
+        rec_thread.start()
+
+        # Wait for completion (on the socket thread, not main thread)
+        total_duration = sum(s.get("bars", 8) for s in sections) * beats_per_bar * seconds_per_beat
+        rec_thread.join(timeout=total_duration + 30)
+
+        if result_holder["error"]:
+            raise result_holder["error"]
+        if not result_holder["done"]:
+            raise Exception("Recording timed out")
+        return result_holder["result"]
 
     def _get_device_parameters(self, track_index, device_index):
         """Get all parameters of a device on a track"""

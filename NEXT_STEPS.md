@@ -2,120 +2,93 @@
 
 Roadmap for achieving full Ableton control via MCP.
 
-## Phase 1: Core Clip & Track Management
+## Completed
 
-Essential CRUD operations that are currently missing.
+### Core Clip & Track Management
+- [x] **Delete clip** — `delete_clip(track_index, clip_index)`
+- [x] **Create audio track** — `create_audio_track(index)`
+- [x] **Delete track** — `delete_track(track_index)`
+- [x] **Duplicate clip** — `duplicate_clip(track_index, clip_index, target_index)`
 
-- [ ] **Delete clip** — `delete_clip(track_index, clip_index)` — call `clip_slot.delete_clip()`
+### Mixing
+- [x] **Set track volume** — `set_track_volume(track_index, volume)` (0.0–1.0)
+- [x] **Set track panning** — `set_track_panning(track_index, panning)` (0.0–1.0, 0.5=center)
+- [x] **Mute track** — `set_track_mute(track_index, mute)`
+- [x] **Solo track** — `set_track_solo(track_index, solo)`
+- [x] **Master/return track support** — `track_index: -1` for master, `-2`/`-3` for returns
+
+### Transport & Scene Control
+- [x] **Scene launch** — `fire_scene(scene_index)`
+- [x] **Create scene** — `create_scene(index)`
+- [x] **Delete scene** — `delete_scene(scene_index)`
+- [x] **Set scene name** — `set_scene_name(scene_index, name)`
+
+### Arrangement View
+- [x] **Get arrangement info** — `get_arrangement_info()` — transport state, loop, tempo
+- [x] **Set song time** — `set_song_time(time)` — with retry logic
+- [x] **Set record mode** — `set_record_mode(on)`
+- [x] **Set arrangement overdub** — `set_arrangement_overdub(on)`
+- [x] **Set back to arranger** — `set_back_to_arranger()`
+- [x] **Set arrangement loop** — `set_arrangement_loop(on, start, length)`
+- [x] **Get arrangement clips** — `get_arrangement_clips(track_index)` — per-track
+- [x] **Get full arrangement** — `get_full_arrangement()` — all tracks, scenes, tempo
+- [x] **Record arrangement** — `record_arrangement(sections)` — high-level command with background threading
+
+### Device Control
+- [x] **Get device parameters** — `get_device_parameters(track_index, device_index)`
+- [x] **Set device parameter** — `set_device_parameter(track_index, device_index, parameter_index, value)`
+- [x] **Batch set device parameters** — `batch_set_device_parameters(...)`
+- [x] **Load instrument/effect** — `load_instrument_or_effect(track_index, uri)`
+
+---
+
+## Phase 1: Recording Accuracy (High Priority)
+
+The biggest gap — arrangement recording uses `time.sleep` which drifts. Transitions end up 1-2 beats off after long recordings.
+
+- [ ] **Beat-accurate scene timing** — Poll `song.current_song_time` in a tight loop instead of `time.sleep` to fire scenes at exact beat positions. This would eliminate timing drift entirely.
+- [ ] **Clip trigger quantization** — `set_clip_trigger_quantization(value)` — set `song.clip_trigger_quantization` to snap scene fires to bar boundaries. Values: 0=None, 4=1 Bar, 5=2 Bars, etc.
+- [ ] **Verify recording results** — After `record_arrangement`, automatically call `get_full_arrangement` and validate that clip boundaries match expected positions.
+
+## Phase 2: Missing CRUD Operations
+
 - [ ] **Delete/remove device** — `delete_device(track_index, device_index)` — call `track.delete_device(device_index)`
-- [ ] **Create audio track** — `create_audio_track(index)` — call `song.create_audio_track(index)`
-- [ ] **Delete track** — `delete_track(track_index)` — call `song.delete_track(track_index)`
-- [ ] **Duplicate clip** — `duplicate_clip(track_index, clip_index)` — call `clip_slot.duplicate_clip_to(target_slot)`
 - [ ] **Duplicate track** — `duplicate_track(track_index)` — call `song.duplicate_track(track_index)`
-- [ ] **Set clip loop settings** — `set_clip_loop(track_index, clip_index, loop_start, loop_end, looping)` — set `clip.loop_start`, `clip.loop_end`, `clip.looping`
+- [ ] **Set clip loop settings** — `set_clip_loop(track_index, clip_index, loop_start, loop_end, looping)`
+- [ ] **Get/set clip notes** — read existing notes from a clip (currently can only add)
 
-## Phase 2: Mixing & Routing
+## Phase 3: Mixing & Routing
 
-Complete mixer control beyond volume and panning.
-
-- [ ] **Mute track** — `set_track_mute(track_index, mute)` — set `track.mute`
-- [ ] **Solo track** — `set_track_solo(track_index, solo)` — set `track.solo`
 - [ ] **Arm track** — `set_track_arm(track_index, arm)` — set `track.arm`
 - [ ] **Send levels** — `set_send_level(track_index, send_index, value)` — set `track.mixer_device.sends[send_index].value`
-- [ ] **Track routing** — `set_track_input/output(track_index, routing_type, channel)` — set `track.input_routing_type`, `track.output_routing_type`, etc.
-
-## Phase 3: Transport & Scene Control
-
-Session and arrangement transport features.
-
-- [ ] **Scene launch** — `fire_scene(scene_index)` — call `song.scenes[scene_index].fire()`
-- [ ] **Create scene** — `create_scene(index)` — call `song.create_scene(index)`
-- [ ] **Set time signature** — `set_time_signature(numerator, denominator)` — set `song.signature_numerator`, `song.signature_denominator`
-- [ ] **Quantization** — `set_clip_trigger_quantization(value)` — set `song.clip_trigger_quantization`
-- [ ] **Record** — `start_recording()` — set `song.record_mode`
+- [ ] **Track routing** — `set_track_input/output(track_index, routing_type, channel)`
+- [ ] **Set time signature** — `set_time_signature(numerator, denominator)`
 - [ ] **Metronome** — `set_metronome(on)` — set `song.metronome`
 
-## Phase 4: Arrangement View
+## Phase 4: Automation
 
-Move beyond Session view clips to full arrangement support.
+Parameter automation within clips — adds movement and expression.
 
-- [ ] **Switch to arrangement view** — need to understand how arrangement is accessed via LOM
-- [ ] **Set arrangement position** — `set_current_song_time(time)` — set `song.current_song_time`
-- [ ] **Create arrangement clip** — research how to create clips directly in arrangement tracks (may need `track.arrangement_clips` or duplicating from session)
-- [ ] **Copy session clip to arrangement** — potential workflow: fire clips at specific song positions while recording into arrangement
-- [ ] **Set arrangement loop** — `set_arrangement_loop(start, end, on)` — set `song.loop_start`, `song.loop_length`, `song.loop`
-- [ ] **Arrangement overdub** — `song.arrangement_overdub`
-- [ ] **Get arrangement clips** — read clips from arrangement timeline for each track
-
-### Arrangement Strategy
-
-**Key LOM properties (confirmed from API docs):**
-- `song.current_song_time` — get/set playback position in beats
-- `song.record_mode` — get/set recording state (0=off, 1=on)
-- `song.arrangement_overdub` — get/set arrangement overdub
-- `song.session_record` — get/set session recording
-- `song.back_to_arranger` — return to arrangement from session
-- `song.loop` / `song.loop_start` / `song.loop_length` — arrangement loop control
-- `song.is_playing` — playback state
-
-**There is no direct "create clip at arrangement position" API.** The LOM only exposes arrangement clips for reading, not writing. The proven approaches are:
-
-#### Approach 1: Record Session to Arrangement (recommended)
-Record session clips into the arrangement by triggering playback with arrangement record enabled.
-
-Build a `record_session_to_arrangement(scene_index, start_time, bars)` command that:
-1. `song.current_song_time = start_time` — seek to position
-2. `song.record_mode = 1` — enable arrangement recording
-3. `song.scenes[scene_index].fire()` — fire the scene
-4. Wait for N bars (calculate from tempo)
-5. `song.record_mode = 0` — stop recording
-6. `song.stop_playing()` — stop playback
-
-This captures the session clips (with all effects and mixing) into arrangement clips.
-
-#### Approach 2: Layered Recording
-For more complex arrangements, record multiple passes:
-1. Record drums for 32 bars
-2. Record bass for bars 8-32
-3. Record chords for bars 16-32
-This builds up an arrangement with intro/buildup/drop structure.
-
-#### Required commands to implement:
-- [ ] `set_song_time(time)` — set `song.current_song_time`
-- [ ] `set_record_mode(on)` — set `song.record_mode`
-- [ ] `set_arrangement_overdub(on)` — set `song.arrangement_overdub`
-- [ ] `set_back_to_arranger()` — set `song.back_to_arranger = True`
-- [ ] `fire_scene(scene_index)` — fire all clips in a scene
-- [ ] `set_loop(on, start, length)` — control arrangement loop
-- [ ] `get_arrangement_info()` — read `song.current_song_time`, `song.is_playing`, `song.record_mode`, etc.
-- [ ] `record_session_to_arrangement(scene_index, start_time, bars)` — high-level command combining the above
-
-## Phase 5: Automation
-
-Parameter automation within clips.
-
-- [ ] **Get clip envelopes** — `get_clip_envelopes(track_index, clip_index)` — read `clip.automation_envelope`
+- [ ] **Get clip envelopes** — `get_clip_envelopes(track_index, clip_index)` — read automation data
 - [ ] **Set automation point** — `insert_automation_value(track_index, clip_index, parameter_id, time, value)`
-- [ ] **Clear automation** — `clear_envelope(track_index, clip_index, parameter_id)` — call `clip.clear_envelope(parameter_id)`
+- [ ] **Clear automation** — `clear_envelope(track_index, clip_index, parameter_id)`
 
-## Phase 6: Advanced
+## Phase 5: Advanced
 
 Nice-to-haves for a complete integration.
 
 - [ ] **Undo** — `undo()` — call `song.undo()`
 - [ ] **Redo** — `redo()` — call `song.redo()`
 - [ ] **Save** — `save()` — call `song.save()`
-- [ ] **Audio clip support** — loading audio files onto audio tracks (may require browser item loading)
+- [ ] **Audio clip support** — loading audio files onto audio tracks
 - [ ] **Capture MIDI** — `song.capture_midi()`
 - [ ] **Groove pool** — apply groove templates to clips
+- [ ] **Cross-fader** — control crossfader assignment and position
 
 ## Priority Order
 
-For the most immediate impact on music-making workflow:
-
-1. **Phase 4** (Arrangement) — unlocks full song creation, not just loops
-2. **Phase 1** (CRUD) — needed for iterating without accumulating dead clips/tracks
-3. **Phase 2** (Mixing) — mute/solo especially useful during composition
-4. **Phase 3** (Transport) — scene launching for live performance
-5. **Phase 5** (Automation) — adds movement and expression
-6. **Phase 6** (Advanced) — polish and convenience
+1. **Phase 1** (Recording Accuracy) — makes arrangement recording production-ready
+2. **Phase 2** (CRUD) — needed for iterating without accumulating dead clips/tracks
+3. **Phase 3** (Mixing & Routing) — send levels and routing for complex mixes
+4. **Phase 4** (Automation) — adds movement and expression to arrangements
+5. **Phase 5** (Advanced) — polish and convenience
