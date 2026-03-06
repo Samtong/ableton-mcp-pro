@@ -1,284 +1,168 @@
-# Ableton MCP Extended
-**Control Ableton Live using natural language via AI assistants like Claude or Cursor. This project provides a robust Model Context Protocol (MCP) server that translates natural language commands into precise actions within your Ableton Live session.**
+# Ableton MCP Pro
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Ableton Live 11+](https://img.shields.io/badge/Ableton%20Live-11+-orange.svg)](https://www.ableton.com/)
+Full control of Ableton Live through AI assistants via the Model Context Protocol (MCP). Create tracks, program MIDI, load instruments, mix, automate, and record arrangements — all from natural language.
 
----
+Forked from [uisato/ableton-mcp-extended](https://github.com/uisato/ableton-mcp-extended), inspired by [ahujasid/ableton-mcp](https://github.com/ahujasid/ableton-mcp).
 
-Video demonstration: https://www.youtube.com/watch?v=7ZKPIrJuuKk
+## What's New
 
-This tool is designed for producers, developers, and AI enthusiasts who want to streamline their music production workflow, experiment with generative music, and build custom integrations with Ableton Live.
+This fork adds significant capabilities beyond the original:
 
-**You can transform this conversation:**
-```
-👤 "Create a brief minimalist/neo-classical composition in a style similar to Ólafur Arnalds'. (Ableton MCP) / I've loaded four MIDI tracks called "Noire" and "Noire (2) ["Emotional Felt" presets], "Noire (2) ["Reversed Felt" preset, for ambient background], and "Noire (3) ["Ethereal Felt" preset, also for ambient background]. All loaded with nice piano instruments. You have also a MIDI track called "Strings" with a nice string ensemble instrument loaded. Feel free to add new instruments and effects, if pertinent."
-🤖 "Creating MIDI clips... Adding effects... Done!"
-👤 "Then, use ElevenLabs MCP to create a spoken-word audio clip (default voice and settings) with a relevant poem in the style of “Jim Morrison” to accompany the composition."  
-🤖 "Generating poem... Transforming it into speech... Importing it into your session... Done!"
-```
+- **Arrangement recording** — Record session clips into the arrangement with bar-accurate scene transitions
+- **Smooth automation envelopes** — Interpolated ramps between points (not just flat steps)
+- **Full mixing** — Volume, panning, sends, mute, solo, arm for all tracks including master and returns
+- **Scene management** — Create, delete, rename, and fire scenes for arrangement workflows
+- **Track management** — Create/delete/duplicate MIDI and audio tracks
+- **Clip operations** — Duplicate, delete, loop control, get/set notes
+- **Browser integration** — Browse and load instruments, effects, and presets by URI
+- **Device control** — Get/set any device parameter, batch updates
+- **Arrangement playback** — Dedicated `play_arrangement` command that switches to arrangement view
+- **Undo/redo** support
 
-**Into this music production session**:
+See [NEXT_STEPS.md](NEXT_STEPS.md) for the full feature list and roadmap.
 
-https://github.com/user-attachments/assets/d6ef2de5-bdeb-4097-acc0-67d70f7f85b3
-
----
-
-## Key Features
-
-This project provides comprehensive, programmatic control over the Ableton Live environment.
-
-* **Session and Transport Control:**
-    * Start and stop playback.
-    * Get session info, including tempo, time signature, and track count.
-    * Manage scenes: create, delete, rename, and fire.
-
-* **Track Management:**
-    * Create, rename, and get detailed information for MIDI and audio tracks.
-    * Control track properties: volume, panning, mute, solo, and arm.
-    * Manage track grouping and folding states.
-
-* **MIDI Clip and Note Manipulation:**
-    * Create and name MIDI clips with specified lengths.
-    * Add, delete, transpose, and quantize notes within clips.
-    * Perform batch edits on multiple notes in a single operation.
-    * Adjust clip loop parameters and follow actions.
-
-* **Device and Parameter Control:**
-    * Load instruments and effects from Ableton's browser by URI.
-    * Get a full list of parameters for any device on a track.
-    * Set and batch-set device parameters using normalized values (0.0 to 1.0).
-
-* **Automation and Envelopes:**
-    * Add and clear automation points for any device parameter within a clip. [This feature isn't working perfectly yet.]
-    * Get information about existing clip envelopes.
-
-* **Browser Integration:**
-    * Navigate and list items from Ableton's browser.
-    * Load instruments, effects, and samples directly from a browser path or URI.
-    * Import audio files directly into audio tracks or clip slots.
-
-* **Voice & Audio Generation** 
-    * Text-to-Speech Integration: Generate narration, vocal samples, or spoken elements through ElevenLabs MCP [included].
-    * Custom Voice Creation: Clone voices for unique character in your tracks  
-    * Sound Effects: Create custom SFX with AI
-    * Direct Import: Generated audio appears instantly in your Ableton session
-
-* **Extensible Framework for Custom Tools**
-    * Example: XY Mouse Controller: Demonstrates creating custom Ableton controllers with the MCP framework
-    * Ultra-Low Latency: High-performance UDP protocol enables responsive real-time control
-    * Unlimited Possibilities: Build your own custom tools and controllers for Ableton Live
-
----
-
-##  Quick Start (5 Minutes)
+## Setup
 
 ### Prerequisites
-- Ableton Live 11+ (any edition)
-- Python 3.10 or higher
-- Claude Desktop or Cursor IDE
 
-### 1. **Get the Code**
+- Ableton Live 11+ (any edition)
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+
+### 1. Clone the repo
+
 ```bash
-git clone https://github.com/uisato/ableton-mcp-extended.git
-cd ableton-mcp-extended
-pip install -e .
+git clone https://github.com/nicholasbien/ableton-mcp-pro.git
+cd ableton-mcp-pro
 ```
 
-### 2. **Install Ableton Script**
-1. Find your Ableton Remote Scripts folder:
-   - **Windows**: `C:\Users\[You]\Documents\Ableton\User Library\Remote Scripts\`
-   - **Mac**: `~/Library/Preferences/Ableton/Live [Version]/User Remote Scripts/`
-2. Create folder: `AbletonMCP`
-3. Copy `AbletonMCP_Remote_Script/__init__.py` into this folder
+### 2. Install the Remote Script in Ableton
 
-### 3. **Configure Ableton**
+Copy the Remote Script into Ableton's MIDI Remote Scripts folder:
+
+**Mac:**
+```bash
+mkdir -p "/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/MIDI Remote Scripts/AbletonMCP"
+cp AbletonMCP_Remote_Script/__init__.py "/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/MIDI Remote Scripts/AbletonMCP/__init__.py"
+```
+
+**Windows:**
+```
+Copy AbletonMCP_Remote_Script\__init__.py to:
+C:\ProgramData\Ableton\Live 12 Suite\Resources\MIDI Remote Scripts\AbletonMCP\__init__.py
+```
+
+> Adjust the path for your Ableton version (Live 11, Live 12, Suite vs Standard, etc).
+
+### 3. Enable in Ableton
+
 1. Open Ableton Live
-2. Go to **Preferences** → **Link, Tempo & MIDI**
-3. Set **Control Surface** to "AbletonMCP"
-4. Set Input/Output to "None"
+2. Go to **Preferences** > **Link, Tempo & MIDI**
+3. Set a **Control Surface** slot to **AbletonMCP**
+4. Leave Input and Output set to **None**
 
-### 4. **Connect AI Assistant**
+You should see "AbletonMCP: Listening for commands on port 9877" in the status bar.
 
-**For Claude Desktop:**
+### 4. Connect your AI assistant
+
+#### Claude Code (CLI)
+
+Add to your `.mcp.json` in the project root:
+
 ```json
 {
   "mcpServers": {
     "AbletonMCP": {
-      "command": "python",
-      "args": ["C:/path/to/ableton-mcp-extended/MCP_Server/server.py"]
+      "command": "uv",
+      "args": [
+        "run",
+        "--project", "/path/to/ableton-mcp-pro",
+        "python",
+        "/path/to/ableton-mcp-pro/MCP_Server/server.py"
+      ]
     }
   }
 }
 ```
 
-**For Cursor:**
-Add MCP server in Settings → MCP with the same path.
+#### Claude Desktop
 
-### 5. **Start Creating!** 
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "AbletonMCP": {
+      "command": "/opt/homebrew/bin/uv",
+      "args": [
+        "run",
+        "--project", "/path/to/ableton-mcp-pro",
+        "python",
+        "/path/to/ableton-mcp-pro/MCP_Server/server.py"
+      ]
+    }
+  }
+}
+```
+
+> Replace `/path/to/ableton-mcp-pro` with the actual path where you cloned the repo. If you don't have `uv`, you can use `pip install -e .` and replace the command with `python` and args with just the server path.
+
+#### Cursor
+
+Add an MCP server in **Settings > MCP** with the same command and args as above.
+
+### 5. Try it
+
 Open your AI assistant and try:
-- *"Create a new MIDI track with a piano"*
-- *"Add a simple drum beat"*
-- *"What tracks do I currently have?"*
-
----
+- "What tracks do I have?"
+- "Create a MIDI track, load Analog on it, and program a bass line"
+- "Set the tempo to 128 and add a compressor to the master"
 
 ## How It Works
 
-```mermaid
-graph TB
-    A[You: Natural Language] --> B[AI Assistant]
-    B --> C[MCP Server]
-    C --> D[Ableton Remote Script]
-    D --> E[Ableton Live API]
-    E --> F[🎵 Your Music]
-    
-    G[ElevenLabs AI] --> H[Generated Audio]
-    H --> C
+```
+AI Assistant --> MCP Server (Python) --> TCP socket (port 9877) --> Remote Script (inside Ableton)
 ```
 
-1. You issue a command in plain English to your AI assistant (e.g., "Create a new MIDI track and name it 'Bass'").
-2. The AI Assistant understands the intent and calls the appropriate tool from the MCP server.
-3. The MCP Server (server.py) receives the tool call and constructs a specific JSON command.
-4. The Ableton Remote Script (__init__.py), running inside Live, receives the JSON command via a socket connection.
-5. The Remote Script executes the command using the official Ableton Live API, making the change in your session instantly.
+1. You give a natural language instruction to your AI assistant
+2. The assistant calls MCP tools like `create_clip`, `add_notes_to_clip`, `set_device_parameter`
+3. The MCP server sends JSON commands over TCP to the Remote Script running inside Ableton
+4. The Remote Script executes commands using Ableton's Live Object Model (LOM)
 
----
+## Available Tools
 
-## Advanced Features
+### Read
+`get_session_info`, `get_track_info`, `get_device_parameters`, `get_arrangement_info`, `get_arrangement_clips`, `get_full_arrangement`, `get_clip_notes`, `get_clip_envelope`, `get_browser_tree`, `get_browser_items_at_path`
 
-<details>
-<summary><strong>🚀 High-Performance Mode (UDP Server)</strong></summary>
+### Modify
+`create_midi_track`, `create_audio_track`, `create_clip`, `add_notes_to_clip`, `set_clip_name`, `set_clip_loop`, `delete_clip`, `duplicate_clip`, `delete_track`, `duplicate_track`, `set_track_name`, `set_track_volume`, `set_track_panning`, `set_track_mute`, `set_track_solo`, `set_track_arm`, `set_send_level`, `set_tempo`, `set_time_signature`, `set_metronome`, `fire_clip`, `stop_clip`, `fire_scene`, `create_scene`, `delete_scene`, `set_scene_name`, `start_playback`, `stop_playback`, `play_arrangement`, `load_instrument_or_effect`, `set_device_parameter`, `batch_set_device_parameters`, `delete_device`, `set_song_time`, `set_record_mode`, `set_arrangement_overdub`, `set_back_to_arranger`, `set_arrangement_loop`, `set_clip_envelope`, `clear_clip_envelope`, `undo`, `redo`
 
+### Special
+`record_arrangement` — Records session clips into the arrangement by firing scenes at timed intervals with bar-accurate transitions.
 
-For real-time parameter control with ultra-low latency:
+## Updating the Remote Script
+
+When you modify `AbletonMCP_Remote_Script/__init__.py`:
 
 ```bash
-# Install the hybrid server
-cp -r Ableton-MCP_hybrid-server/AbletonMCP_UDP/ ~/Remote\ Scripts/AbletonMCP_UDP/
-
-# Try the XY Mouse Controller example
-cd experimental_tools/xy_mouse_controller
-python mouse_parameter_controller_udp.py
+cp AbletonMCP_Remote_Script/__init__.py "/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/MIDI Remote Scripts/AbletonMCP/__init__.py"
+rm -rf "/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/MIDI Remote Scripts/AbletonMCP/__pycache__"
 ```
 
-This demonstrates how to build:
-- Custom real-time controllers for Ableton
-- Expressive performance tools
-- Interactive music applications
-</details>
+Then **fully restart Ableton** (toggling the Control Surface in preferences doesn't reliably reload the script).
 
-<details>
-<summary><strong>🎤 ElevenLabs Voice Integration</strong></summary>
+## Known Limitations
 
+- **Arrangement clips are read-only** — The LOM can't create/delete arrangement clips directly. Use `record_arrangement` to record from session, or record an empty scene to erase.
+- **Audio clip loading** — `ClipSlot.create_clip()` only accepts a length (for MIDI clips), not file paths. Audio clips must be dragged manually from Ableton's browser.
+- **Stale song reference** — First command after an Ableton restart may fail (retry works). The script auto-refreshes its internal reference.
 
-This repository can be integrated with other MCP servers, such as one for ElevenLabs, to generate and import audio directly into your project.
+## Development
 
-Set up the ElevenLabs MCP server according to its instructions.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for the full development guide — threading model, adding new commands, device parameters, automation, and recording architecture.
 
-Update your AI assistant's config to include both servers.
+## License
 
-Example mcp-config.json:
+MIT — see [LICENSE](LICENSE).
 
-```json
-{
-  "mcpServers": {
-    "AbletonMCP": {
-      "command": "python",
-      "args": ["/path/to/ableton-mcp-extended/server.py"]
-    },
-    "ElevenLabs": {
-      "command": "python",
-      "args": ["/path/to/elevenlabs_mcp/server.py"],
-      "env": {
-        "ELEVENLABS_API_KEY": "your-api-key-here"
-      }
-    }
-  }
-}
-```
-
-</details>
-
----
-
-## Components Overview
-
-This project includes several specialized components:
-
-### **Core MCP Server**
-- Standard TCP communication for reliable AI control
-- Extensive Ableton Live API integration
-- Compatible with Claude Desktop, Cursor, and Gemini CLI.
-
-### **Hybrid TCP/UDP Server** 
-- High-performance real-time parameter control
-- Ultra-low latency for live performance
-- Perfect for controllers and interactive tools
-
-### **ElevenLabs Integration**
-- Professional text-to-speech generation
-- Custom voice creation and cloning
-- Direct import into Ableton sessions
-- Real-time SFX generation
-
-### **Experimental Tools & Examples**
-- **XY Mouse Controller**: Example demonstrating how to build custom Ableton controllers
-- **Extensible Framework**: Foundation for creating your own control interfaces
-- **Proof of Concept**: Shows the power and flexibility of the MCP approach
-
----
-
-## Documentation
-
-- **[Installation Guide](INSTALLATION.md)** - Detailed setup instructions
-- **[User Guide](README.md)** - What, which, and how  
-
----
-
-## Community & Support
-
-- **GitHub Issues**: Bug reports and feature requests
-- **Discussions**: Share your creations and get help
-
-### **Share Your Creations**
-Tag me with your AI-generated experiments! I love seeing what the community creates:
-
-[YouTube](https://www.youtube.com/@uisato_) |
-[Instagram](https://www.instagram.com/uisato_) |
-[Patreon](https://www.patreon.com/c/uisato) |
-[Website](https://www.uisato.art/) 
-
----
-
-## What's Next
-
-- **Fixing Automation Point Placement Bugs**
-- **VST Plugin Support** - Control third-party plugins [Though it can be achieved throught the "Configure" parameter function]
-- **Arrangement View** - Full timeline control
-- **Hardware Integration** - Bridge MIDI controllers through AI
-- **Advanced AI** - Smarter and better music understanding and generation
-
----
-
-## License & Credits
-
-This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
-
-**Built with:**
-- [Model Context Protocol](https://github.com/modelcontextprotocol) - AI integration framework
-- [ElevenLabs API](https://elevenlabs.io) - Professional voice generation
-- [Ableton Live](https://www.ableton.com) - Digital audio workstation
-
-**Inspired by:** The original [ableton-mcp](https://github.com/ahujasid/ableton-mcp) project
-
----
-
-<div align="center">
-
-**Made with ❤️ for the music production community**
-
-*If this project helps your creativity, consider giving it a ⭐ star!*
-
-</div> 
+**Built with** [Model Context Protocol](https://github.com/modelcontextprotocol) and [Ableton Live](https://www.ableton.com).
