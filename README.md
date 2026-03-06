@@ -2,7 +2,7 @@
 
 Full control of Ableton Live through AI assistants via the Model Context Protocol (MCP). Create tracks, program MIDI, load instruments, mix, automate, and record arrangements — all from natural language.
 
-### Demo Tracks (made entirely by Claude)
+### Demo Tracks
 
 - [claude_hardgroove](https://soundcloud.com/nicholasbien/claude_hardgroove)
 - [claude_song1](https://soundcloud.com/nicholasbien/claude_song1)
