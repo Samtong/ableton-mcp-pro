@@ -57,7 +57,7 @@ Skills can also be combined — ask for "techno drums and bass" and Claude will 
 
 ### Creating Your Own Skills
 
-See the [Skill Authoring Guide](.claude/skills/SKILL_AUTHORING_GUIDE.md) for best practices on creating new skills.
+See the [Skill Authoring Guide](SKILL_AUTHORING_GUIDE.md) for best practices on creating new skills.
 
 ## Setup
 
