@@ -100,3 +100,96 @@ After Ableton restarts or swaps documents, cached `self._song` becomes invalid. 
 - [ ] **Groove pool** — apply groove templates to clips
 - [ ] **Cross-fader** — control crossfader assignment and position
 - [ ] **Arrangement automation** — Currently automation only applies to session clips and gets baked in during recording. Direct arrangement envelope editing would require M4L.
+
+---
+
+## MCP Limitations for Music Skills
+
+The following MCP capabilities are missing and limit what music production skills can fully execute. Listed in priority order by how many skills they'd unlock.
+
+### Priority 1: Rack Creation & Chain Management
+
+**What's missing:** No way to create Instrument Racks or Audio Effect Racks with multiple chains (e.g., Dry/Wet parallel processing, layered instrument patches).
+
+**Skills blocked:**
+- **growl-bass** — Needs Dry (clean sub) + Wet (growl) chains with inverted macro control
+- **reese-bass** — Needs Instrument Rack to layer saw oscillators + sine sub as separate chains
+- **supersaw-chords** — Needs Instrument Rack for mono center layer + stereo width layer + noise layer
+- **synthwave** — Needs Audio Effect Rack for parallel Dry/Wet gated reverb snare
+- **dub-techno** — Needs multi-chain racks for effect layering
+
+**How to implement:** The Remote Script API exposes `Track.devices` and rack internals. Key LOM objects:
+- `RackDevice.chains` — list of chains in a rack
+- `RackDevice.create_chain()` — add a chain (may need investigation)
+- `Chain.devices` — devices within a chain
+- Alternatively: load a pre-built rack template from the browser, then modify its devices/parameters
+
+**Workaround today:** Load effects in series on a single chain (loses the parallel Dry/Wet routing). Or use multiple tracks panned/routed to achieve the same result.
+
+### Priority 2: MIDI Effect Loading
+
+**What's missing:** Unclear if `load_instrument_or_effect` can load MIDI effects (Chord, Scale, Arpeggiator) — these live in a different part of Ableton's device chain (before the instrument).
+
+**Skills blocked:**
+- **supersaw-chords** — Uses Chord MIDI effect for automatic octave doubling
+- **synthwave** — Uses Arpeggiator MIDI effect for 16th note arps
+- **trance-melodies** — References Scale MIDI effect for staying in key
+- **ukg-drums** — References Scale for percussion tuning
+
+**How to implement:** Test if `browser.load_item()` works for MIDI effects found under the MIDI Effects browser category. If not, may need a dedicated `load_midi_effect` command that inserts before the instrument in the chain.
+
+**Workaround today:** Program the notes manually (e.g., write octave-doubled notes instead of using Chord device, write arpeggiated patterns instead of using Arpeggiator).
+
+### Priority 3: Return Track Creation
+
+**What's missing:** `set_send_level` exists but there's no way to create new return tracks or load effects onto them. Returns use `track_index: -2, -3, etc.` but only if they already exist.
+
+**Skills blocked:**
+- **ukg-drums** — Send 1 (Drum Bus) + Send 2 (Redux) processing architecture
+- **dub-techno** — Multi-send reverb architecture (2-3 reverb returns)
+- **house-drums** — Parallel compression on a return track
+- **techno-drums** — Short dark reverb + ping-pong delay sends
+
+**How to implement:** The LOM has `song.create_return_track()`. Add a `create_return_track()` MCP tool that creates a return and returns its index. Then effects can be loaded via `load_instrument_or_effect(track_index=-2, ...)`.
+
+**Workaround today:** Use insert effects instead of sends (less flexible but functional).
+
+### Priority 4: Groove Pool / Swing Templates
+
+**What's missing:** No way to apply groove templates from Ableton's Groove Pool to clips.
+
+**Skills blocked:**
+- **drum-swing** — References MPC groove templates at specific percentages
+- **ukg-drums** — MPC 16th swing at 60-70% depth
+- **house-drums** — 54-58% swing on hats/percussion
+
+**How to implement:** The LOM has `Clip.groove` property and groove pool access. Add `apply_groove(track_index, clip_index, groove_name, amount)` tool.
+
+**Workaround today:** Manually nudge notes off-grid using specific timing offsets in `add_notes_to_clip`.
+
+### Priority 5: Slice Audio to MIDI
+
+**What's missing:** No way to slice an audio clip into a Drum Rack with individual hits mapped to pads.
+
+**Skills removed due to this:**
+- **dnb-drums** — Core workflow is slicing the Amen break
+- **breakbeat** — Core workflow is chopping breaks at house tempo
+
+**How to implement:** This is complex — likely requires:
+1. Detecting transients in audio (may need M4L or external processing)
+2. Creating a Drum Rack with Simpler instances
+3. Setting each Simpler's sample start/end points
+
+**Workaround today:** These skills were removed. Users can slice manually in Ableton, then use MCP to program patterns on the resulting Drum Rack.
+
+### Priority 6: Macro Mapping
+
+**What's missing:** No way to map device parameters to Rack macro knobs.
+
+**Skills blocked:**
+- **growl-bass** — Maps Oscillator D level to Macro 1 for performance control
+- **dub-techno** — Macro-controlled effect parameters
+
+**How to implement:** `RackDevice.macros_mapped` and macro mapping is accessible through the LOM but complex to set up programmatically.
+
+**Workaround today:** Use clip automation on the specific parameter instead of macro mapping.

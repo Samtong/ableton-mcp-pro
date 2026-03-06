@@ -24,6 +24,36 @@ This fork adds significant capabilities beyond the original:
 
 See [NEXT_STEPS.md](NEXT_STEPS.md) for the full feature list and roadmap.
 
+## Music Production Skills
+
+When used with [Claude Code](https://claude.com/claude-code), this project includes 20 production skills that guide Claude through genre-specific workflows — from sound design to pattern programming to mixing. Each skill provides specific, actionable parameter values.
+
+### Available Skills
+
+| Category | Skills |
+|----------|--------|
+| **Techno** | [techno-drums](.claude/skills/techno-drums/SKILL.md) — minimal/dark techno percussion with Operator synthesis<br>[techno-bass](.claude/skills/techno-bass/SKILL.md) — 3 Operator patches (sub, distorted, acid-influenced)<br>[hardgroove-drums](.claude/skills/hardgroove-drums/SKILL.md) — driving tom-heavy patterns with layered percussion<br>[hardgroove-bass](.claude/skills/hardgroove-bass/SKILL.md) — simple driving basslines with FM and acid variations |
+| **House & Garage** | [house-drums](.claude/skills/house-drums/SKILL.md) — classic 4/4 patterns with open hats and congas<br>[house-chords](.claude/skills/house-chords/SKILL.md) — stabs, deep pads, disco filtered chords<br>[ukg-drums](.claude/skills/ukg-drums/SKILL.md) — 2-step patterns with gain staging and 5 pattern templates<br>[speed-garage](.claude/skills/speed-garage/SKILL.md) — walking FM bass, rave loops, vocal chops |
+| **Trance** | [trance-bass](.claude/skills/trance-bass/SKILL.md) — 3 essential types (offbeat, filled 16ths, octave jump)<br>[trance-melodies](.claude/skills/trance-melodies/SKILL.md) — melody writing with call-and-response and tension/resolution |
+| **Bass Music** | [acid-bass](.claude/skills/acid-bass/SKILL.md) — 303-style squelch with accent, slide, and distortion<br>[growl-bass](.claude/skills/growl-bass/SKILL.md) — FM synthesis growl with macro control and formant filters<br>[reese-bass](.claude/skills/reese-bass/SKILL.md) — detuned saw phasing with notch filter movement |
+| **Synth & Ambient** | [supersaw-chords](.claude/skills/supersaw-chords/SKILL.md) — Wavetable unison patches with mono/stereo layering<br>[ethereal-pads](.claude/skills/ethereal-pads/SKILL.md) — split-voice chord layers with drone notes and noise<br>[ambient](.claude/skills/ambient/SKILL.md) — reverb-as-sound-design with granular textures<br>[synthwave](.claude/skills/synthwave/SKILL.md) — gated reverb, arps, retro bass and leads |
+| **Production** | [mixing-guide](.claude/skills/mixing-guide/SKILL.md) — systematic mixing workflow with master chain<br>[track-arrangement](.claude/skills/track-arrangement/SKILL.md) — loop-to-full-track with genre-specific notes<br>[drum-swing](.claude/skills/drum-swing/SKILL.md) — MPC swing percentages, humanization, groove theory |
+
+### Using Skills
+
+Skills activate automatically based on what you ask. Examples:
+
+- *"Make me a techno beat"* → triggers techno-drums
+- *"Add an acid bassline"* → triggers acid-bass
+- *"Let's mix this track"* → triggers mixing-guide
+- *"Make some dreamy pads"* → triggers ethereal-pads
+
+Skills can also be combined — ask for "techno drums and bass" and Claude will use both techno-drums and techno-bass skills together.
+
+### Creating Your Own Skills
+
+See the [Skill Authoring Guide](.claude/skills/SKILL_AUTHORING_GUIDE.md) for best practices on creating new skills.
+
 ## Setup
 
 ### Prerequisites
