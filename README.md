@@ -9,14 +9,17 @@ Forked from [uisato/ableton-mcp-extended](https://github.com/uisato/ableton-mcp-
 This fork adds significant capabilities beyond the original:
 
 - **Arrangement recording** — Record session clips into the arrangement with bar-accurate scene transitions
+- **Arrangement view** — Read arrangement info, clips per track, full arrangement state; control loop, overdub, song position, and back-to-arranger
+- **Arrangement playback** — Dedicated `play_arrangement` command that switches to arrangement view
 - **Smooth automation envelopes** — Interpolated ramps between points (not just flat steps)
 - **Full mixing** — Volume, panning, sends, mute, solo, arm for all tracks including master and returns
+- **Master/return track support** — Use `track_index: -1` for master, `-2`/`-3` for return tracks across all mixing commands
 - **Scene management** — Create, delete, rename, and fire scenes for arrangement workflows
 - **Track management** — Create/delete/duplicate MIDI and audio tracks
-- **Clip operations** — Duplicate, delete, loop control, get/set notes
+- **Clip operations** — Duplicate, delete, rename, loop control, get/set notes
+- **Device control** — Get/set any device parameter, batch updates, delete devices
 - **Browser integration** — Browse and load instruments, effects, and presets by URI
-- **Device control** — Get/set any device parameter, batch updates
-- **Arrangement playback** — Dedicated `play_arrangement` command that switches to arrangement view
+- **Transport controls** — Tempo, time signature, metronome, record mode
 - **Undo/redo** support
 
 See [NEXT_STEPS.md](NEXT_STEPS.md) for the full feature list and roadmap.
