@@ -598,6 +598,21 @@ def stop_clip(ctx: Context, track_index: int, clip_index: int) -> str:
         return f"Error stopping clip: {str(e)}"
 
 @mcp.tool()
+def play_arrangement(ctx: Context, time: float = 0.0) -> str:
+    """Play the arrangement from a specific position. Stops all session clips and switches to arrangement view.
+
+    Parameters:
+    - time: Position in beats to start from (0.0 = start). Default 0.0.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("play_arrangement", {"time": time})
+        return f"Playing arrangement from beat {time}"
+    except Exception as e:
+        logger.error(f"Error playing arrangement: {str(e)}")
+        return f"Error playing arrangement: {str(e)}"
+
+@mcp.tool()
 def start_playback(ctx: Context) -> str:
     """Start playing the Ableton session."""
     try:

@@ -256,7 +256,8 @@ class AbletonMCP(ControlSurface):
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "create_audio_clip", "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
-                                 "start_playback", "stop_playback", "load_browser_item",
+                                 "start_playback", "stop_playback", "play_arrangement",
+                                 "load_browser_item",
                                  "load_instrument_or_effect",
                                  "set_device_parameter", "batch_set_device_parameters",
                                  "set_track_volume", "set_track_panning",
@@ -320,6 +321,9 @@ class AbletonMCP(ControlSurface):
                             result = self._start_playback()
                         elif command_type == "stop_playback":
                             result = self._stop_playback()
+                        elif command_type == "play_arrangement":
+                            time = params.get("time", None)
+                            result = self._play_arrangement(time)
                         elif command_type == "load_instrument_or_effect":
                             track_index = params.get("track_index", 0)
                             uri = params.get("uri", "")
@@ -958,16 +962,19 @@ class AbletonMCP(ControlSurface):
     def _record_arrangement(self, sections):
         """Record session clips into arrangement by firing scenes at timed intervals.
         sections: list of {"scene_index": int, "bars": int}
-        Runs timing on a background thread to avoid freezing Ableton's UI.
-        Uses schedule_message to execute Ableton operations on the main thread."""
+
+        Uses polling with fire-and-forget scene fires (no round-trip wait).
+        clip_trigger_quantization=4 (1 Bar) snaps fires to bar boundaries.
+        Fires scene 2 beats before target so quantization lands on the right bar."""
         import time as time_module
 
         tempo = self._song.tempo
         beats_per_bar = self._song.signature_numerator
         seconds_per_beat = 60.0 / tempo
 
-        # Result container for the background thread
         result_holder = {"result": None, "error": None, "done": False}
+        saved_quantization = [0]
+        cancelled = [False]
 
         def do_on_main(fn):
             """Execute fn on main thread and wait for completion."""
@@ -984,16 +991,29 @@ class AbletonMCP(ControlSurface):
             if error_holder[0]:
                 raise error_holder[0]
 
+        def fire_and_forget(fn):
+            """Schedule fn on main thread without waiting. For time-critical fires."""
+            def guarded():
+                if not cancelled[0]:
+                    fn()
+            self.schedule_message(0, guarded)
+
         def recording_thread():
             try:
-                # Save and set clip trigger quantization to 1 Bar for tight scene transitions
-                saved_quantization = [0]
+                # Save and set clip trigger quantization to 1 Bar
                 def set_quantization():
                     saved_quantization[0] = self._song.clip_trigger_quantization
-                    self._song.clip_trigger_quantization = 4  # 4 = 1 Bar
+                    self._song.clip_trigger_quantization = 4  # 1 Bar
                 do_on_main(set_quantization)
 
-                # Stop playback and prepare (on main thread)
+                # Disarm all tracks to prevent stray MIDI recording
+                def disarm_all():
+                    for track in self._song.tracks:
+                        if track.can_be_armed and track.arm:
+                            track.arm = False
+                do_on_main(disarm_all)
+
+                # Stop playback and prepare
                 do_on_main(lambda: self._song.stop_playing() if self._song.is_playing else None)
                 time_module.sleep(0.1)
                 do_on_main(lambda: setattr(self._song, 'back_to_arranger', True))
@@ -1015,50 +1035,73 @@ class AbletonMCP(ControlSurface):
 
                 total_bars = 0
                 recorded_sections = []
+                scene_count = len(self._song.scenes)
 
                 for i, section in enumerate(sections):
-                    scene_index = section.get("scene_index", 0)
+                    si = section.get("scene_index", 0)
                     bars = section.get("bars", 8)
 
-                    scene_count = [0]
-                    def get_scene_count():
-                        scene_count[0] = len(self._song.scenes)
-                    do_on_main(get_scene_count)
-
-                    if scene_index < 0 or scene_index >= scene_count[0]:
-                        self.log_message("Skipping invalid scene index: {0}".format(scene_index))
+                    if si < 0 or si >= scene_count:
+                        self.log_message("Skipping invalid scene index: {0}".format(si))
                         continue
 
-                    # Fire the scene on main thread
-                    scene_name_holder = [""]
-                    def fire(si=scene_index):
-                        self._song.scenes[si].fire()
-                        scene_name_holder[0] = self._song.scenes[si].name
-                    do_on_main(fire)
+                    # Fire this scene
+                    scene_name = [""]
+                    if i == 0:
+                        # First scene: fire immediately
+                        def fire_first(idx=si):
+                            self._song.scenes[idx].fire()
+                            scene_name[0] = self._song.scenes[idx].name
+                        do_on_main(fire_first)
+                    else:
+                        # Already fired by previous iteration, just get name
+                        def get_name(idx=si):
+                            scene_name[0] = self._song.scenes[idx].name
+                        do_on_main(get_name)
 
                     self.log_message("Recording section {0}: scene {1} ({2}) for {3} bars".format(
-                        i + 1, scene_index, scene_name_holder[0], bars))
+                        i + 1, si, scene_name[0], bars))
 
-                    # Wait until the target beat position (more accurate than time.sleep)
                     target_beat = (total_bars + bars) * beats_per_bar
+                    next_section = sections[i + 1] if i + 1 < len(sections) else None
+                    next_fired = [False]
+
+                    # Fire next scene 2 beats before target.
+                    # With 1-bar quantization, this is within the last bar before
+                    # the target boundary, so it snaps to the target beat.
+                    # Use fire_and_forget (no round-trip wait) to minimize latency.
+                    fire_beat = target_beat - 2.0 if next_section else None
+
                     while True:
-                        current_time_holder = [0.0]
+                        # Read current time — need do_on_main for this
+                        current_holder = [0.0]
                         def get_time():
-                            current_time_holder[0] = self._song.current_song_time
+                            current_holder[0] = self._song.current_song_time
                         do_on_main(get_time)
-                        if current_time_holder[0] >= target_beat - 0.5:
+                        current = current_holder[0]
+
+                        # Fire next scene (fire-and-forget, no waiting)
+                        if fire_beat is not None and not next_fired[0] and current >= fire_beat:
+                            next_si = next_section.get("scene_index", 0)
+                            def fire_next(idx=next_si):
+                                self._song.scenes[idx].fire()
+                            fire_and_forget(fire_next)
+                            next_fired[0] = True
+                            self.log_message("Fired next scene {0} at beat {1:.1f} (target {2})".format(
+                                next_si, current, target_beat))
+
+                        if current >= target_beat - 0.5:
                             break
-                        # Sleep a short interval then check again
-                        remaining = target_beat - current_time_holder[0]
-                        remaining_seconds = remaining * seconds_per_beat
-                        if remaining_seconds > 1.0:
-                            time_module.sleep(remaining_seconds - 0.5)
+
+                        remaining_seconds = (target_beat - current) * seconds_per_beat
+                        if remaining_seconds > 2.0:
+                            time_module.sleep(remaining_seconds - 1.5)
                         else:
-                            time_module.sleep(0.05)
+                            time_module.sleep(0.02)
 
                     recorded_sections.append({
-                        "scene_index": scene_index,
-                        "scene_name": scene_name_holder[0],
+                        "scene_index": si,
+                        "scene_name": scene_name[0],
                         "bars": bars,
                         "start_bar": total_bars + 1,
                         "end_bar": total_bars + bars
@@ -1069,11 +1112,15 @@ class AbletonMCP(ControlSurface):
                 do_on_main(lambda: setattr(self._song, 'record_mode', 0))
                 time_module.sleep(0.05)
                 do_on_main(lambda: self._song.stop_playing())
+                time_module.sleep(0.1)
 
-                # Restore original quantization
-                def restore_quantization():
+                # Restore quantization and return to arrangement
+                def cleanup():
                     self._song.clip_trigger_quantization = saved_quantization[0]
-                do_on_main(restore_quantization)
+                    self._song.stop_all_clips()
+                    self._song.back_to_arranger = True
+                    self._song.current_song_time = 0.0
+                do_on_main(cleanup)
 
                 result_holder["result"] = {
                     "total_bars": total_bars,
@@ -1082,7 +1129,7 @@ class AbletonMCP(ControlSurface):
                     "tempo": tempo
                 }
             except Exception as e:
-                # Make sure we stop recording and restore quantization on error
+                cancelled[0] = True
                 try:
                     do_on_main(lambda: setattr(self._song, 'record_mode', 0))
                     do_on_main(lambda: self._song.stop_playing())
@@ -1094,12 +1141,10 @@ class AbletonMCP(ControlSurface):
             finally:
                 result_holder["done"] = True
 
-        # Start recording on background thread
         rec_thread = threading.Thread(target=recording_thread)
         rec_thread.daemon = True
         rec_thread.start()
 
-        # Wait for completion (on the socket thread, not main thread)
         total_duration = sum(s.get("bars", 8) for s in sections) * beats_per_bar * seconds_per_beat
         rec_thread.join(timeout=total_duration + 30)
 
@@ -1727,11 +1772,27 @@ class AbletonMCP(ControlSurface):
             raise
     
     
+    def _play_arrangement(self, time=None):
+        """Stop session clips, return to arrangement, optionally seek, and play."""
+        try:
+            self._song.stop_all_clips()
+            self._song.back_to_arranger = True
+            if time is not None:
+                self._song.current_song_time = float(time)
+            self._song.start_playing()
+            return {
+                "playing": True,
+                "position": self._song.current_song_time
+            }
+        except Exception as e:
+            self.log_message("Error playing arrangement: " + str(e))
+            raise
+
     def _start_playback(self):
         """Start playing the session"""
         try:
             self._song.start_playing()
-            
+
             result = {
                 "playing": self._song.is_playing
             }

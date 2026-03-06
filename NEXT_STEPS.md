@@ -64,8 +64,8 @@ Roadmap for achieving full Ableton control via MCP.
 ### Arrangement Clips Are Read-Only
 The LOM cannot create, delete, or modify arrangement clips directly. The only way to populate the arrangement is by recording session clips into it using `record_arrangement`. To erase content, record an empty scene over the region.
 
-### Recording Timing Drift (~4 beats)
-Scene transitions drift ~4 beats (1 bar) over a 48-bar recording despite using `song.current_song_time` polling. This is because scene firing isn't quantized — the scene fires immediately when the poll detects the target beat, but there's latency between detection and execution. Setting `clip_trigger_quantization` to snap to bar boundaries would fix this.
+### Recording Timing (Solved)
+Scene transitions previously drifted ~4 beats due to `do_on_main` round-trip latency causing late fires that quantization pushed to the next bar. Fixed by using `fire_and_forget` (no round-trip wait) + 1-bar quantization. Scenes now fire 2 beats before the target boundary; quantization snaps to the correct bar. Pre-scheduling via `schedule_message(ticks, fn)` was also tried but failed — the tick rate is unreliable and caused early fires.
 
 ### Audio Clip Loading
 - `browser.load_item()` works for instruments/effects but .alc audio clips only load device chains, not the audio clip itself
@@ -82,6 +82,10 @@ After Ableton restarts or swaps documents, cached `self._song` becomes invalid. 
 
 ### High Priority: Recording Accuracy
 - [x] **Clip trigger quantization** — `record_arrangement` now sets `song.clip_trigger_quantization = 4` (1 Bar) before recording and restores original value after. Scene fires snap to bar boundaries.
+- [x] **Fire-and-forget scene fires** — Scene fires use `schedule_message(0, fn)` without waiting for round-trip completion. Eliminates `do_on_main` latency that caused late fires + quantization drift.
+- [x] **Auto-disarm tracks** — All tracks disarmed before recording to prevent stray MIDI input during erase or recording.
+- [x] **Cancellation support** — Scheduled callbacks check a `cancelled` flag; set on error to prevent stale scene fires.
+- [x] **Play arrangement** — `play_arrangement(time)` stops session clips, switches to arrangement view, and plays from a position.
 - [ ] **Verify recording results** — After `record_arrangement`, automatically call `get_full_arrangement` and validate clip boundaries match expected positions.
 
 ### Audio Support
