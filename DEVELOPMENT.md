@@ -300,12 +300,23 @@ Do NOT use `set_track_mute` during recording to create sections. Muting silences
 
 ### Erasing Arrangement Content
 
-There's no API to delete arrangement clips. To erase leftover content, record an empty scene (one with no clips) over the section you want to clear:
+There's no API to delete arrangement clips. To erase leftover content, record an empty scene (one with no clips) over the section you want to clear. **Important: disarm all tracks first**, otherwise armed tracks will record stray MIDI input during the erase.
+
+```python
+# Disarm all tracks
+for i in range(track_count):
+    set_track_arm(i, False)
+
+# Record empty scene over the region
+record_arrangement([{"scene_index": empty_scene_index, "bars": 52}])
 ```
-set_song_time(192)              # seek to where you want to erase from
+
+Or use the manual approach:
+```
+set_song_time(0)
 set_record_mode(True)
-fire_scene(0)                   # scene 0 has no clips — records silence
-sleep(20)                       # cover the leftover duration
+fire_scene(empty_scene_index)   # scene with no clips — records silence
+sleep(duration)
 set_record_mode(False)
 stop_playback()
 ```
@@ -340,15 +351,21 @@ record_arrangement([
 ])
 ```
 
-It automatically: stops playback, seeks to beat 0, enables recording, fires each scene in sequence with correct timing, then stops recording and playback.
+It automatically: stops playback, disarms all tracks, seeks to beat 0, enables recording, fires each scene in sequence with correct timing, stops recording, stops all session clips, returns to arrangement view, and seeks back to beat 0.
 
 ### Threading Architecture
 
 `record_arrangement` runs differently from other commands:
 - It executes on the **socket thread** (not main thread) to avoid deadlocks
-- Timing (`time.sleep`) runs on a **background thread** so Ableton's UI stays responsive
-- Ableton operations (fire scene, set record mode) are dispatched to the **main thread** via `schedule_message(0, task)` with `threading.Event` synchronization
+- Timing runs on a **background thread** so Ableton's UI stays responsive
+- State reads (e.g., `current_song_time`) use `do_on_main` — dispatched to main thread via `schedule_message(0, task)` with `threading.Event` synchronization
+- Scene fires use `fire_and_forget` — `schedule_message(0, fn)` **without** waiting for completion, to minimize latency
+- A `cancelled` flag is checked by all scheduled callbacks; set on error to prevent stale scene fires
 - The MCP server uses a 600s timeout for this command (vs 10-15s for normal commands)
+
+### Playback After Recording
+
+Use `play_arrangement(time)` to play back the arrangement. This command stops all session clips, switches to arrangement view (`back_to_arranger`), seeks to the given position, and starts playback. `start_playback()` does NOT switch views — it just plays whatever is currently active (usually session).
 
 ### Stale `self._song` Reference
 
@@ -364,9 +381,9 @@ The cached `self._song = self.song()` reference becomes invalid when Ableton swa
 
 Cannot delete or trim individual arrangement clips via the API. Only workaround is recording an empty scene (no clips) over the section to erase it.
 
-### Recording Timing Drift (~4 beats)
+### Recording Timing (Solved)
 
-Scene transitions drift ~4 beats (1 bar) over a 48-bar recording at 130 BPM. The recording uses `song.current_song_time` polling (not `time.sleep`), but scene firing isn't quantized — there's latency between detecting the target beat and the scene actually firing. Fix: set `song.clip_trigger_quantization` to snap fires to bar boundaries.
+Scene transitions previously drifted ~4 beats due to `do_on_main` round-trip latency causing late fires that 1-bar quantization pushed to the next bar. Fixed by using `fire_and_forget` (`schedule_message(0, fn)` without waiting) for scene fires. Fires 2 beats before the target boundary; quantization snaps to the correct bar. Pre-scheduling via `schedule_message(ticks, fn)` was also tried but failed — the tick rate is unreliable and caused early fires.
 
 ### Arrangement Clips Are Read-Only
 
@@ -432,6 +449,7 @@ For audio clips, manually drag from Ableton's browser. For MIDI clips from .alc 
 6. **Parameter ranges**: Always use normalized 0.0–1.0 values, not the raw parameter ranges.
 7. **Muting ≠ not recording**: Muted tracks still record into arrangement. Use scene-based recording instead.
 8. **`set_song_time` needs multiple calls**: Retry loop in Remote Script handles this, but sometimes still needs `set_back_to_arranger()` first.
-9. **Session clips keep playing**: After arrangement recording, call `set_back_to_arranger()` to return to arrangement playback.
+9. **Session clips keep playing**: After arrangement recording, use `play_arrangement(time)` to play back — it stops session clips and switches to arrangement view. Or call `set_back_to_arranger()` manually.
+11. **Armed tracks record during erase**: When recording an empty scene to erase arrangement content, armed tracks still record MIDI input. `record_arrangement` now auto-disarms, but manual erase workflows need explicit disarming.
 10. **Stale `self._song`**: Refreshed at start of every `_process_command`. Symptom: C++ signature mismatch error.
 11. **`receive_full_response` timeout override**: Don't hardcode timeouts in `receive_full_response` — let `send_command` set the socket timeout based on command type.
