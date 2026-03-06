@@ -5,7 +5,7 @@ description = "Full control of Ableton Live through AI assistants via the Model 
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    {name = "Nicholas Bien"}
+    {name = "nicholasbien"}
 ]
 license = {text = "MIT"}
 classifiers = [
