@@ -1,4 +1,4 @@
-# Ableton MCP Extended - Next Steps
+# Ableton MCP Pro - Next Steps
 
 Roadmap for achieving full Ableton control via MCP.
 
