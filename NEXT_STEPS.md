@@ -56,7 +56,6 @@ Roadmap for achieving full Ableton control via MCP.
 ### Advanced
 - [x] **Undo** — `undo()`
 - [x] **Redo** — `redo()`
-- [x] **Save** — `save()`
 
 ---
 
@@ -82,7 +81,7 @@ After Ableton restarts or swaps documents, cached `self._song` becomes invalid. 
 ## Remaining Work
 
 ### High Priority: Recording Accuracy
-- [ ] **Clip trigger quantization** — `set_clip_trigger_quantization(value)` — set `song.clip_trigger_quantization` to snap scene fires to bar boundaries (0=None, 4=1 Bar, 5=2 Bars). This would eliminate the ~4 beat drift entirely.
+- [x] **Clip trigger quantization** — `record_arrangement` now sets `song.clip_trigger_quantization = 4` (1 Bar) before recording and restores original value after. Scene fires snap to bar boundaries.
 - [ ] **Verify recording results** — After `record_arrangement`, automatically call `get_full_arrangement` and validate clip boundaries match expected positions.
 
 ### Audio Support

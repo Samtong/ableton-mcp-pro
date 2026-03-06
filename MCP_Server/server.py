@@ -118,7 +118,7 @@ class AbletonConnection:
             "delete_device", "duplicate_track", "set_clip_loop",
             "set_track_arm", "set_send_level", "set_time_signature", "set_metronome",
             "set_clip_envelope", "clear_clip_envelope",
-            "undo", "redo", "save"
+            "undo", "redo"
         ]
         
         try:
@@ -1438,17 +1438,6 @@ def redo(ctx: Context) -> str:
     except Exception as e:
         logger.error(f"Error redoing: {str(e)}")
         return f"Error redoing: {str(e)}"
-
-@mcp.tool()
-def save(ctx: Context) -> str:
-    """Save the current Ableton Live set."""
-    try:
-        ableton = get_ableton_connection()
-        result = ableton.send_command("save", {})
-        return "Saved"
-    except Exception as e:
-        logger.error(f"Error saving: {str(e)}")
-        return f"Error saving: {str(e)}"
 
 # Main execution
 def main():

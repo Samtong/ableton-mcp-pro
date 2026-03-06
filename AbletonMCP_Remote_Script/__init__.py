@@ -270,7 +270,7 @@ class AbletonMCP(ControlSurface):
                                  "delete_device", "duplicate_track", "set_clip_loop",
                                  "set_track_arm", "set_send_level", "set_time_signature",
                                  "set_metronome", "set_clip_envelope", "clear_clip_envelope",
-                                 "undo", "redo", "save"]:
+                                 "undo", "redo"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -449,8 +449,6 @@ class AbletonMCP(ControlSurface):
                             result = self._undo()
                         elif command_type == "redo":
                             result = self._redo()
-                        elif command_type == "save":
-                            result = self._save()
 
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -988,6 +986,13 @@ class AbletonMCP(ControlSurface):
 
         def recording_thread():
             try:
+                # Save and set clip trigger quantization to 1 Bar for tight scene transitions
+                saved_quantization = [0]
+                def set_quantization():
+                    saved_quantization[0] = self._song.clip_trigger_quantization
+                    self._song.clip_trigger_quantization = 4  # 4 = 1 Bar
+                do_on_main(set_quantization)
+
                 # Stop playback and prepare (on main thread)
                 do_on_main(lambda: self._song.stop_playing() if self._song.is_playing else None)
                 time_module.sleep(0.1)
@@ -1065,6 +1070,11 @@ class AbletonMCP(ControlSurface):
                 time_module.sleep(0.05)
                 do_on_main(lambda: self._song.stop_playing())
 
+                # Restore original quantization
+                def restore_quantization():
+                    self._song.clip_trigger_quantization = saved_quantization[0]
+                do_on_main(restore_quantization)
+
                 result_holder["result"] = {
                     "total_bars": total_bars,
                     "total_beats": total_bars * beats_per_bar,
@@ -1072,10 +1082,11 @@ class AbletonMCP(ControlSurface):
                     "tempo": tempo
                 }
             except Exception as e:
-                # Make sure we stop recording on error
+                # Make sure we stop recording and restore quantization on error
                 try:
                     do_on_main(lambda: setattr(self._song, 'record_mode', 0))
                     do_on_main(lambda: self._song.stop_playing())
+                    do_on_main(lambda: setattr(self._song, 'clip_trigger_quantization', saved_quantization[0]))
                 except:
                     pass
                 self.log_message("Error recording arrangement: " + str(e))
@@ -1392,15 +1403,6 @@ class AbletonMCP(ControlSurface):
             return {"redone": True}
         except Exception as e:
             self.log_message("Error redoing: " + str(e))
-            raise
-
-    def _save(self):
-        """Save the current Live set"""
-        try:
-            self._song.save()
-            return {"saved": True}
-        except Exception as e:
-            self.log_message("Error saving: " + str(e))
             raise
 
     def _get_device_parameters(self, track_index, device_index):
