@@ -1,8 +1,8 @@
 """
 MIDI Gen AI Bridge: Ableton MCP clip notes -> AI MIDI generation -> notes back.
 
-Wraps openmusenet2 (v2 model) but named generically so the backend can be
-swapped later without churning callers.
+Uses the [midigenai](https://github.com/nicholasbien/midi-gen-ai) package directly;
+the model is downloaded from HuggingFace on first use and cached locally.
 
 Reads JSON config from stdin:
   {
@@ -11,15 +11,24 @@ Reads JSON config from stdin:
     "max_new_tokens": 256, "temperature": 1.0, "top_k": 50,
     "prompt_end_beat": 32.0,           # filter output to notes after this beat
     "pitch_range": [60, 96],           # optional pitch filter
-    "checkpoint": "...", "tokenizer": "..."  # optional model overrides
+    "version": "v2",                   # which subfolder of the HF repo to load
+                                       # (default: $MIDIGENAI_VERSION env var, then "v2-pilot")
+    "repo_id": "nicholasbien/midigenai" # default: $MIDIGENAI_REPO_ID, then "nicholasbien/midigenai"
   }
 
 Writes JSON to stdout:
   {"prompt_tokens": int, "generated_tokens": int, "tempo_bpm": float,
    "notes": [{"pitch", "start_time", "duration", "velocity"}, ...]}
 
-Run with the openmusenet2 venv:
-  /Users/nicholasbien/openmusenet2/.venv/bin/python tools/midi_gen_ai_bridge.py < cfg.json
+Switching to a new model release in the future:
+  1. Push the new model to a new subfolder on the HF repo
+  2. Either bump `MIDIGENAI_VERSION` env var (no code change), pass
+     `"version"` in the JSON payload, or update midigenai's
+     `v2/hub.py::DEFAULT_VERSION`. Whichever is most convenient.
+
+Run with whatever Python env has the `[ai]` extras installed:
+  pip install "ableton-mcp-pro[ai]"
+  python tools/midigenai_bridge.py < cfg.json
 """
 
 import json
@@ -27,12 +36,21 @@ import sys
 import tempfile
 from pathlib import Path
 
-OMN2_ROOT = Path("/Users/nicholasbien/openmusenet2")
-DEFAULT_CKPT = OMN2_ROOT / "runs/pilot_lambda/ckpt_final.pt"
-DEFAULT_TOKENIZER = OMN2_ROOT / "runs/pilot_lambda/tokenizer.json"
 TPQ = 480
 
-sys.path.insert(0, str(OMN2_ROOT))
+# Lazy global so repeated calls in the same process don't reload the model
+_GENERATOR = None
+
+
+def _get_generator(repo_id, version):
+    """Cache one generator per (repo_id, version) tuple."""
+    global _GENERATOR
+    cache_key = (repo_id, version)
+    if _GENERATOR is None or _GENERATOR[0] != cache_key:
+        from midigenai import load_v2_from_hub
+        gen = load_v2_from_hub(version=version, repo_id=repo_id)
+        _GENERATOR = (cache_key, gen)
+    return _GENERATOR[1]
 
 
 def notes_to_score(notes, tempo_bpm):
@@ -93,16 +111,16 @@ def main():
     if prompt_end_beat is not None:
         prompt_end_beat = float(prompt_end_beat)
     pitch_range = cfg.get("pitch_range")
-    ckpt = cfg.get("checkpoint", str(DEFAULT_CKPT))
-    tokenizer = cfg.get("tokenizer", str(DEFAULT_TOKENIZER))
+    # version/repo_id default to None — midigenai resolves env vars + DEFAULT_VERSION
+    version = cfg.get("version")
+    repo_id = cfg.get("repo_id")
 
     score = notes_to_score(notes, tempo)
     with tempfile.NamedTemporaryFile(suffix=".mid", delete=False) as f:
         in_path = f.name
     score.dump_midi(in_path)
 
-    from v2.generate_v2 import V2Generator
-    gen = V2Generator(checkpoint_path=ckpt, tokenizer_path=tokenizer)
+    gen = _get_generator(repo_id, version)
     prompt_ids = gen.encode_midi_file(in_path)
 
     out_path = in_path.replace(".mid", "_out.mid")

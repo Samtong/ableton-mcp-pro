@@ -1,15 +1,25 @@
 # tools/
 
 Helper scripts that compose with the Ableton MCP server but run as their own
-processes. Kept here (rather than inside `MCP_Server/`) so they're driven via
-shell from the agent (or by you) without touching the MCP server.
+processes. The agent (or you) drives them via shell, no MCP server changes.
 
 ## midigenai_bridge.py — AI MIDI continuation
 
-CLI that turns a list of MIDI notes into an AI-generated continuation. Wraps
-[openmusenet2](https://github.com/nicholasbien/openmusenet2) (v2 model). The
-filename is intentionally backend-agnostic so we can swap models later without
-churning callers.
+CLI that turns Ableton clip notes into an AI-generated continuation. Wraps
+the [`midigenai`](https://github.com/nicholasbien/midi-gen-ai) package
+(currently a 25M custom transformer, event-based tokenization). The model
+is auto-downloaded from
+[huggingface.co/nicholasbien/midigenai](https://huggingface.co/nicholasbien/midigenai)
+on first use and cached at `~/.cache/huggingface/`.
+
+### Setup
+
+```bash
+pip install "ableton-mcp-pro[ai]"
+```
+
+That installs `midigenai`, `torch`, `miditok`, `symusic`, and
+`huggingface_hub`. No separate repo clone, no extra venv.
 
 ### What it does
 
@@ -20,46 +30,21 @@ build a temporary .mid file
     ↓
 encode with the v2 MidiTok tokenizer
     ↓
-sample N tokens from the v2 transformer (Lambda-trained 25M checkpoint)
+sample N tokens from the v2 transformer (downloaded from HF on first call)
     ↓
-decode back to MIDI, read notes, drop everything ≤ prompt_end_beat
+decode back to MIDI, drop everything ≤ prompt_end_beat
     ↓
 JSON notes (stdout)
 ```
 
-### Dependencies
-
-This bridge runs in **openmusenet2's venv**, not the MCP server's. That keeps
-the MCP server lean (no torch/miditok/symusic in its env).
-
-You need:
-
-1. The **openmusenet2 repo** cloned next to this one (or anywhere — the path
-   is hard-coded in the bridge; edit if yours differs):
-   - default: `/Users/nicholasbien/openmusenet2/`
-2. **openmusenet2's venv** with `torch`, `miditok`, `symusic` installed:
-   - default: `/Users/nicholasbien/openmusenet2/.venv/`
-3. **A v2 checkpoint + tokenizer** at:
-   - `runs/pilot_lambda/ckpt_final.pt`
-   - `runs/pilot_lambda/tokenizer.json`
-
-   These are produced by openmusenet2's training pipeline (see `v2/train_v2.py`
-   and `setup_lambda.sh`). The pilot Lambda checkpoint (~97 MB, 25M params)
-   loads in <2s on CPU and generates ~70 notes/s.
-
-   Override the paths via the `checkpoint` / `tokenizer` keys in the JSON
-   payload if you have a different model.
-
 ### Usage
-
-Build a JSON config, pipe it to the bridge using openmusenet2's venv:
 
 ```bash
 echo '{
   "notes": [
-    {"pitch": 62, "start_time": 0.0, "duration": 0.5, "velocity": 100},
-    {"pitch": 66, "start_time": 0.5, "duration": 0.5, "velocity": 100},
-    {"pitch": 69, "start_time": 1.0, "duration": 0.5, "velocity": 100}
+    {"pitch": 74, "start_time": 0,  "duration": 1, "velocity": 95},
+    {"pitch": 78, "start_time": 1,  "duration": 1, "velocity": 95},
+    {"pitch": 81, "start_time": 2,  "duration": 2, "velocity": 100}
   ],
   "tempo_bpm": 80,
   "max_new_tokens": 256,
@@ -67,7 +52,7 @@ echo '{
   "top_k": 50,
   "prompt_end_beat": 4.0,
   "pitch_range": [60, 92]
-}' | /Users/nicholasbien/openmusenet2/.venv/bin/python tools/midigenai_bridge.py
+}' | python tools/midigenai_bridge.py
 ```
 
 Returns:
@@ -81,8 +66,8 @@ Returns:
 }
 ```
 
-Note start times are returned **relative to `prompt_end_beat`**, so they're
-ready to drop into a fresh clip starting at beat 0.
+Note start times are returned **relative to `prompt_end_beat`** so the result
+drops cleanly into a fresh clip starting at beat 0.
 
 ### Knobs
 
@@ -95,7 +80,34 @@ ready to drop into a fresh clip starting at beat 0.
 | `top_k` | nucleus sampling K |
 | `prompt_end_beat` | drop output notes that start before this beat (= filter out the prompt itself) |
 | `pitch_range` | optional `[min, max]` MIDI pitch filter — useful when you only want, say, the lead range |
-| `checkpoint`, `tokenizer` | optional model overrides |
+| `version` | which subfolder of the HF repo to load. Defaults to `MIDIGENAI_VERSION` env var, then `v2-pilot`. |
+| `repo_id` | HF model repo. Defaults to `MIDIGENAI_REPO_ID` env var, then `nicholasbien/midigenai`. |
+
+### Switching to a new model release
+
+Three ways to point the bridge at a different version, in increasing scope:
+
+```bash
+# 1) Per-call (just for one generation):
+echo '{ "notes": [...], "version": "v2" }' | python tools/midigenai_bridge.py
+
+# 2) Per shell session:
+export MIDIGENAI_VERSION=v2
+python tools/midigenai_bridge.py < cfg.json
+
+# 3) Permanent: bump DEFAULT_VERSION in midigenai/v2/hub.py
+```
+
+To see what's published:
+
+```python
+from midigenai import list_hub_versions
+list_hub_versions()         # ['v2-pilot']
+```
+
+Adding a new version on the model author side = upload `ckpt_final.pt` and
+`tokenizer.json` to a new subfolder of the HF model repo. No code changes
+needed in midigenai or the bridge — both auto-discover.
 
 ### Wiring it into the Ableton workflow
 
@@ -112,11 +124,20 @@ plain CLI; the agent drives it via shell. Reasons:
 
 - No MCP server restart needed when the bridge changes
 - The bridge can be used standalone outside the agent (`echo … | python …`)
-- The dependency on openmusenet2's venv stays out of the MCP server's env
+- The MCP server stays lean — `[ai]` is opt-in, not required
+
+### Prompt design
+
+v2 was trained on single-track polyphonic MIDI (heavy on piano via Lakh +
+MAESTRO + POP909 + GiantMIDI). Best results come from:
+
+- A monophonic or lightly-polyphonic **melodic seed** (4–8 bars, ~10–15 notes)
+- Single instrument (omit `program` from notes, or all on the same program)
+- Avoid feeding several stacked tracks (pad chords + bass + lead) — the model
+  is happiest continuing a coherent musical phrase, not multi-part arrangements
 
 ### Performance
 
-Cold call ≈ 2s (model load + ~250 tokens). If you start hammering it, the
-~2s/call gets old fast. Cleanest fix is a small local Flask server in the
-openmusenet2 venv that loads the model once and exposes `/generate` —
-mirroring what `web_server_modal.py` does for Modal. Defer until needed.
+First call ≈ 2–4s on CPU (download + model load + ~250 tokens). Subsequent
+calls in the same Python process reuse the loaded generator, so they run at
+~70 notes/s. The bridge keeps the generator alive in a module-level cache.
