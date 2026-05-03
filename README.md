@@ -6,6 +6,7 @@ Full control of Ableton Live through AI assistants via the Model Context Protoco
 
 - [claude_hardgroove](https://soundcloud.com/nicholasbien/claude_hardgroove)
 - [claude_song1](https://soundcloud.com/nicholasbien/claude_song1)
+- [claude_downtempo](https://soundcloud.com/nicholasbien/claude_downtempo)
 
 Forked from [uisato/ableton-mcp-extended](https://github.com/uisato/ableton-mcp-extended), inspired by [ahujasid/ableton-mcp](https://github.com/ahujasid/ableton-mcp).
 
