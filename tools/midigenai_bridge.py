@@ -11,8 +11,8 @@ Reads JSON config from stdin:
     "max_new_tokens": 256, "temperature": 1.2, "top_k": 50,
     "prompt_end_beat": 32.0,           # filter output to notes after this beat
     "pitch_range": [60, 96],           # optional pitch filter
-    "version": "v2",                   # which subfolder of the HF repo to load
-                                       # (default: $MIDIGENAI_VERSION env var, then "v2-100m")
+    "version": "v2-100m",              # which subfolder of the HF repo to load
+                                       # (default: $MIDIGENAI_VERSION env var, then midigenai's DEFAULT_VERSION)
     "repo_id": "nicholasbien/midigenai" # default: $MIDIGENAI_REPO_ID, then "nicholasbien/midigenai"
   }
 
