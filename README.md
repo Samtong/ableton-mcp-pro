@@ -174,10 +174,14 @@ AI Assistant --> MCP Server (Python) --> TCP socket (port 9877) --> Remote Scrip
 `get_session_info`, `get_track_info`, `get_device_parameters`, `get_arrangement_info`, `get_arrangement_clips`, `get_full_arrangement`, `get_clip_notes`, `get_clip_envelope`, `get_browser_tree`, `get_browser_items_at_path`
 
 ### Modify
-`create_midi_track`, `create_audio_track`, `create_clip`, `add_notes_to_clip`, `set_clip_name`, `set_clip_loop`, `delete_clip`, `duplicate_clip`, `delete_track`, `duplicate_track`, `set_track_name`, `set_track_volume`, `set_track_panning`, `set_track_mute`, `set_track_solo`, `set_track_arm`, `set_send_level`, `set_tempo`, `set_time_signature`, `set_metronome`, `fire_clip`, `stop_clip`, `fire_scene`, `create_scene`, `delete_scene`, `set_scene_name`, `start_playback`, `stop_playback`, `play_arrangement`, `load_instrument_or_effect`, `set_device_parameter`, `batch_set_device_parameters`, `delete_device`, `set_song_time`, `set_record_mode`, `set_arrangement_overdub`, `set_back_to_arranger`, `set_arrangement_loop`, `set_clip_envelope`, `clear_clip_envelope`, `undo`, `redo`
+`create_midi_track`, `create_audio_track`, `create_clip`, `create_audio_clip`, `add_notes_to_clip`, `set_clip_name`, `set_clip_loop`, `delete_clip`, `duplicate_clip`, `delete_track`, `duplicate_track`, `set_track_name`, `set_track_volume`, `set_track_panning`, `set_track_mute`, `set_track_solo`, `set_track_arm`, `set_send_level`, `set_tempo`, `set_time_signature`, `set_metronome`, `fire_clip`, `stop_clip`, `fire_scene`, `create_scene`, `delete_scene`, `set_scene_name`, `start_playback`, `stop_playback`, `play_arrangement`, `load_instrument_or_effect`, `set_device_parameter`, `batch_set_device_parameters`, `delete_device`, `set_song_time`, `set_record_mode`, `set_arrangement_overdub`, `set_back_to_arranger`, `set_arrangement_loop`, `set_clip_envelope`, `clear_clip_envelope`, `undo`, `redo`
 
-### Special
-`record_arrangement` — Records session clips into the arrangement by firing scenes at timed intervals with bar-accurate transitions.
+### Arrangement
+`record_arrangement` — Records session clips into the arrangement by firing scenes at timed intervals with bar-accurate transitions. Accepts an optional `start_time` to append past existing material instead of overwriting from beat 0.
+
+`create_arrangement_audio_clip(track_index, file_path, time, length?)` — Place an audio sample directly into an arrangement audio track at a given beat position. Pair with `get_arrangement_clips` (which now returns `file_path` for audio clips) to clone or remix existing samples without re-recording.
+
+`create_arrangement_midi_clip(track_index, time, length, notes?)` — Create a MIDI clip directly in arrangement at a given beat position, optionally seeded with notes. No session-view round-trip needed.
 
 ## Updating the Remote Script
 

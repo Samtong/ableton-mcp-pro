@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict, Any, List, Union
+from typing import AsyncIterator, Dict, Any, List, Optional, Union
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -103,7 +103,8 @@ class AbletonConnection:
         # Check if this is a state-modifying command
         is_modifying_command = command_type in [
             "create_midi_track", "create_audio_track", "set_track_name",
-            "create_clip", "create_audio_clip", "add_notes_to_clip", "set_clip_name",
+            "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
+            "create_arrangement_midi_clip", "add_notes_to_clip", "set_clip_name",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
             "batch_set_device_parameters",
             "start_playback", "stop_playback", "load_instrument_or_effect",
@@ -380,6 +381,84 @@ def create_audio_clip(ctx: Context, track_index: int, clip_index: int, file_path
     except Exception as e:
         logger.error(f"Error creating audio clip: {str(e)}")
         return f"Error creating audio clip: {str(e)}"
+
+@mcp.tool()
+def create_arrangement_midi_clip(
+    ctx: Context,
+    track_index: int,
+    time: float,
+    length: float,
+    notes: Optional[List[Dict[str, Union[int, float, bool]]]] = None,
+) -> str:
+    """
+    Create a MIDI clip directly in the arrangement view at a given position.
+    Optionally seed it with notes in one call.
+    Requires Live 11+ (uses Track.create_midi_clip API).
+
+    Parameters:
+    - track_index: Index of a MIDI track
+    - time: Arrangement position in beats where the clip should start
+    - length: Clip length in beats (e.g. 32.0 = 8 bars at 4/4)
+    - notes: Optional list of {pitch, start_time, duration, velocity, mute?} dicts.
+             Note start_times are relative to the clip's start.
+    """
+    try:
+        ableton = get_ableton_connection()
+        params = {
+            "track_index": track_index,
+            "time": time,
+            "length": length,
+        }
+        if notes is not None:
+            params["notes"] = notes
+        result = ableton.send_command("create_arrangement_midi_clip", params)
+        return (
+            f"Created arrangement MIDI clip on track {track_index} "
+            f"at beat {result.get('start_time', time)} "
+            f"(length: {result.get('length', length)} beats, "
+            f"notes: {result.get('note_count', 0)}, "
+            f"arrangement_clip_index: {result.get('arrangement_clip_index', -1)})"
+        )
+    except Exception as e:
+        logger.error(f"Error creating arrangement MIDI clip: {str(e)}")
+        return f"Error creating arrangement MIDI clip: {str(e)}"
+
+@mcp.tool()
+def create_arrangement_audio_clip(
+    ctx: Context,
+    track_index: int,
+    file_path: str,
+    time: float,
+    length: Optional[float] = None,
+) -> str:
+    """
+    Create an audio clip in the arrangement view at a given position.
+    Requires Live 11+ (uses Track.create_audio_clip API).
+
+    Parameters:
+    - track_index: Index of an audio track
+    - file_path: Absolute path to an audio file (wav, aiff, flac, mp3, etc.)
+    - time: Arrangement position in beats where the clip should start
+    - length: Optional clip length in beats. If omitted, the file's natural length is used.
+    """
+    try:
+        ableton = get_ableton_connection()
+        params = {
+            "track_index": track_index,
+            "file_path": file_path,
+            "time": time,
+        }
+        if length is not None:
+            params["length"] = length
+        result = ableton.send_command("create_arrangement_audio_clip", params)
+        return (
+            f"Created arrangement audio clip '{result.get('name', '')}' "
+            f"on track {track_index} at beat {result.get('start_time', time)} "
+            f"(length: {result.get('length', 0)} beats)"
+        )
+    except Exception as e:
+        logger.error(f"Error creating arrangement audio clip: {str(e)}")
+        return f"Error creating arrangement audio clip: {str(e)}"
 
 @mcp.tool()
 def add_notes_to_clip(
@@ -1136,7 +1215,7 @@ def get_arrangement_clips(ctx: Context, track_index: int) -> str:
         return f"Error getting arrangement clips: {str(e)}"
 
 @mcp.tool()
-def record_arrangement(ctx: Context, sections: List[dict]) -> str:
+def record_arrangement(ctx: Context, sections: List[dict], start_time: float = 0.0) -> str:
     """
     Record session clips into the arrangement by firing scenes at timed intervals.
     This runs inside Ableton for precise timing. Handles seeking, recording, and stopping automatically.
@@ -1144,11 +1223,14 @@ def record_arrangement(ctx: Context, sections: List[dict]) -> str:
     Parameters:
     - sections: List of {"scene_index": int, "bars": int} defining each section.
                 Example: [{"scene_index": 0, "bars": 8}, {"scene_index": 1, "bars": 8}, {"scene_index": 2, "bars": 16}]
+    - start_time: Arrangement position in beats to begin recording from. Default 0
+                  (beginning). Use this to append a new section past existing material.
     """
     try:
         ableton = get_ableton_connection()
         result = ableton.send_command("record_arrangement", {
-            "sections": sections
+            "sections": sections,
+            "start_time": start_time
         })
         total_bars = result.get("total_bars", 0)
         tempo = result.get("tempo", 120)
