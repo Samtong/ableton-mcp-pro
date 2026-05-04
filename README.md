@@ -14,8 +14,9 @@ Forked from [uisato/ableton-mcp-extended](https://github.com/uisato/ableton-mcp-
 
 This fork adds significant capabilities beyond the original:
 
-- **Arrangement recording** — Record session clips into the arrangement with bar-accurate scene transitions
-- **Arrangement view** — Read arrangement info, clips per track, full arrangement state; control loop, overdub, song position, and back-to-arranger
+- **Direct arrangement editing** — Read, place, and delete clips in arrangement view without going through session-view recording. Drop audio samples by file path and MIDI clips with notes seeded inline.
+- **Arrangement recording** — Record session clips into the arrangement with bar-accurate scene transitions, with `start_time` to append past existing material
+- **Arrangement view** — Read arrangement info, clips per track (with `file_path` for audio clips), full arrangement state; control loop, overdub, song position, and back-to-arranger
 - **Arrangement playback** — Dedicated `play_arrangement` command that switches to arrangement view
 - **Smooth automation envelopes** — Interpolated ramps between points (not just flat steps)
 - **Full mixing** — Volume, panning, sends, mute, solo, arm for all tracks including master and returns
@@ -171,17 +172,27 @@ AI Assistant --> MCP Server (Python) --> TCP socket (port 9877) --> Remote Scrip
 ## Available Tools
 
 ### Read
-`get_session_info`, `get_track_info`, `get_device_parameters`, `get_arrangement_info`, `get_arrangement_clips`, `get_full_arrangement`, `get_clip_notes`, `get_clip_envelope`, `get_browser_tree`, `get_browser_items_at_path`
+`get_session_info`, `get_track_info`, `get_device_parameters`, `get_arrangement_info`, `get_arrangement_clips`, `get_full_arrangement`, `get_clip_notes`, `get_arrangement_clip_notes`, `get_clip_envelope`, `get_browser_tree`, `get_browser_items_at_path`
 
 ### Modify
-`create_midi_track`, `create_audio_track`, `create_clip`, `create_audio_clip`, `add_notes_to_clip`, `set_clip_name`, `set_clip_loop`, `delete_clip`, `duplicate_clip`, `delete_track`, `duplicate_track`, `set_track_name`, `set_track_volume`, `set_track_panning`, `set_track_mute`, `set_track_solo`, `set_track_arm`, `set_send_level`, `set_tempo`, `set_time_signature`, `set_metronome`, `fire_clip`, `stop_clip`, `fire_scene`, `create_scene`, `delete_scene`, `set_scene_name`, `start_playback`, `stop_playback`, `play_arrangement`, `load_instrument_or_effect`, `set_device_parameter`, `batch_set_device_parameters`, `delete_device`, `set_song_time`, `set_record_mode`, `set_arrangement_overdub`, `set_back_to_arranger`, `set_arrangement_loop`, `set_clip_envelope`, `clear_clip_envelope`, `undo`, `redo`
+`create_midi_track`, `create_audio_track`, `create_clip`, `create_audio_clip`, `add_notes_to_clip`, `set_clip_name`, `set_clip_loop`, `delete_clip`, `delete_arrangement_clip`, `duplicate_clip`, `delete_track`, `duplicate_track`, `set_track_name`, `set_track_volume`, `set_track_panning`, `set_track_mute`, `set_track_solo`, `set_track_arm`, `set_send_level`, `set_tempo`, `set_time_signature`, `set_metronome`, `fire_clip`, `stop_clip`, `fire_scene`, `create_scene`, `delete_scene`, `set_scene_name`, `start_playback`, `stop_playback`, `play_arrangement`, `load_instrument_or_effect`, `set_device_parameter`, `batch_set_device_parameters`, `delete_device`, `set_song_time`, `set_record_mode`, `set_arrangement_overdub`, `set_back_to_arranger`, `set_arrangement_loop`, `set_clip_envelope`, `clear_clip_envelope`, `undo`, `redo`
 
 ### Arrangement
-`record_arrangement` — Records session clips into the arrangement by firing scenes at timed intervals with bar-accurate transitions. Accepts an optional `start_time` to append past existing material instead of overwriting from beat 0.
+The arrangement view supports a **full read-modify-write loop directly**, no session-view round-trip required:
 
-`create_arrangement_audio_clip(track_index, file_path, time, length?)` — Place an audio sample directly into an arrangement audio track at a given beat position. Pair with `get_arrangement_clips` (which now returns `file_path` for audio clips) to clone or remix existing samples without re-recording.
+- `get_arrangement_clips(track_index)` — list clips on a track with `start_time`, `length`, and (for audio) `file_path` of the source sample.
+- `get_arrangement_clip_notes(track_index, arrangement_clip_index)` — read MIDI notes from any arrangement clip.
+- `create_arrangement_audio_clip(track_index, file_path, time, length?)` — place a sample directly at a beat position. Pair with `file_path` from `get_arrangement_clips` to clone/remix existing samples.
+- `create_arrangement_midi_clip(track_index, time, length, notes?)` — create a MIDI clip and (optionally) seed all notes inline in one call.
+- `delete_arrangement_clip(track_index, arrangement_clip_index)` — remove a clip by index.
+- `record_arrangement(sections, start_time?)` — record session scenes into arrangement with bar-accurate transitions; `start_time` appends past existing material instead of overwriting from beat 0.
 
-`create_arrangement_midi_clip(track_index, time, length, notes?)` — Create a MIDI clip directly in arrangement at a given beat position, optionally seeded with notes. No session-view round-trip needed.
+#### Session vs. arrangement workflow
+
+Both views are useful — pick based on what you're doing:
+
+- **Use session view** for iteration: building a chord progression, dialing in a drum pattern, A/B-ing variations, or anywhere the agent benefits from tight `create_clip` → `add_notes_to_clip` → `fire_clip` loops where the user can hear changes immediately.
+- **Use arrangement view** for the final song structure: build, drops, breaks, transitions. Once a section is right, the agent should prefer `create_arrangement_midi_clip` / `create_arrangement_audio_clip` to place the section directly in arrangement at the target beat position rather than re-recording session clips. This keeps the timeline clean (no overdubbed takes), avoids overwriting existing arrangement material, and lets the agent edit the final song surgically — read what's there with `get_arrangement_clips` / `get_arrangement_clip_notes`, swap or delete with `delete_arrangement_clip`, and place new material at exact beat positions.
 
 ## Updating the Remote Script
 
