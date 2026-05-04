@@ -192,9 +192,11 @@ Then **fully restart Ableton** (toggling the Control Surface in preferences does
 ## AI Melody Generation
 
 `tools/midigenai_bridge.py` is a CLI that pipes Ableton clip notes through
-[openmusenet2](https://github.com/nicholasbien/openmusenet2) (v2 model) to
-generate melody continuations. The agent reads a clip with `get_clip_notes`,
-shells out to the bridge, and writes the result back with
+the [midigenai](https://github.com/nicholasbien/midi-gen-ai) package
+(v2 model, weights on
+[huggingface.co/nicholasbien/midigenai](https://huggingface.co/nicholasbien/midigenai))
+to generate melody continuations. The agent reads a clip with
+`get_clip_notes`, shells out to the bridge, and writes the result back with
 `add_notes_to_clip` — no MCP server changes needed. See
 [tools/README.md](tools/README.md) for setup, dependencies, and usage.
 
