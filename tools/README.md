@@ -48,7 +48,7 @@ echo '{
   ],
   "tempo_bpm": 80,
   "max_new_tokens": 256,
-  "temperature": 1.0,
+  "temperature": 1.2,
   "top_k": 50,
   "prompt_end_beat": 4.0,
   "pitch_range": [60, 92]
@@ -80,7 +80,7 @@ drops cleanly into a fresh clip starting at beat 0.
 | `top_k` | nucleus sampling K |
 | `prompt_end_beat` | drop output notes that start before this beat (= filter out the prompt itself) |
 | `pitch_range` | optional `[min, max]` MIDI pitch filter — useful when you only want, say, the lead range |
-| `version` | which subfolder of the HF repo to load. Defaults to `MIDIGENAI_VERSION` env var, then `v2-pilot`. |
+| `version` | which subfolder of the HF repo to load. Defaults to `MIDIGENAI_VERSION` env var, then `v2-100m`. |
 | `repo_id` | HF model repo. Defaults to `MIDIGENAI_REPO_ID` env var, then `nicholasbien/midigenai`. |
 
 ### Switching to a new model release
@@ -102,7 +102,7 @@ To see what's published:
 
 ```python
 from midigenai import list_hub_versions
-list_hub_versions()         # ['v2-pilot']
+list_hub_versions()         # ['v2-100m', 'v2-pilot']  # 100M is the current default
 ```
 
 Adding a new version on the model author side = upload `ckpt_final.pt` and

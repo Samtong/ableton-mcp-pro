@@ -8,11 +8,11 @@ Reads JSON config from stdin:
   {
     "notes": [{"pitch": 62, "start_time": 0.0, "duration": 0.5, "velocity": 100}, ...],
     "tempo_bpm": 80.0,
-    "max_new_tokens": 256, "temperature": 1.0, "top_k": 50,
+    "max_new_tokens": 256, "temperature": 1.2, "top_k": 50,
     "prompt_end_beat": 32.0,           # filter output to notes after this beat
     "pitch_range": [60, 96],           # optional pitch filter
     "version": "v2",                   # which subfolder of the HF repo to load
-                                       # (default: $MIDIGENAI_VERSION env var, then "v2-pilot")
+                                       # (default: $MIDIGENAI_VERSION env var, then "v2-100m")
     "repo_id": "nicholasbien/midigenai" # default: $MIDIGENAI_REPO_ID, then "nicholasbien/midigenai"
   }
 
@@ -105,7 +105,7 @@ def main():
     notes = cfg["notes"]
     tempo = float(cfg.get("tempo_bpm", 120.0))
     max_new_tokens = int(cfg.get("max_new_tokens", 256))
-    temperature = float(cfg.get("temperature", 1.0))
+    temperature = float(cfg.get("temperature", 1.2))
     top_k = int(cfg.get("top_k", 50))
     prompt_end_beat = cfg.get("prompt_end_beat")
     if prompt_end_beat is not None:
