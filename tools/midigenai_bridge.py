@@ -1,7 +1,7 @@
 """
 MIDI Gen AI Bridge: Ableton MCP clip notes -> AI MIDI generation -> notes back.
 
-Uses the [midigenai](https://github.com/nicholasbien/midi-gen-ai) package directly;
+Uses the [midigenai](https://github.com/nicholasbien/midigenai) package directly;
 the model is downloaded from HuggingFace on first use and cached locally.
 
 Reads JSON config from stdin:

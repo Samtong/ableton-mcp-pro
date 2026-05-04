@@ -6,7 +6,7 @@ processes. The agent (or you) drives them via shell, no MCP server changes.
 ## midigenai_bridge.py — AI MIDI continuation
 
 CLI that turns Ableton clip notes into an AI-generated continuation. Wraps
-the [`midigenai`](https://github.com/nicholasbien/midi-gen-ai) package
+the [`midigenai`](https://github.com/nicholasbien/midigenai) package
 (currently a 25M custom transformer, event-based tokenization). The model
 is auto-downloaded from
 [huggingface.co/nicholasbien/midigenai](https://huggingface.co/nicholasbien/midigenai)
