@@ -17,6 +17,15 @@ dependencies = [
     "mcp[cli]>=1.3.0",
 ]
 
+[project.optional-dependencies]
+ai = [
+    "midigenai @ git+https://github.com/nicholasbien/midigenai@pip-install-and-hf-download",
+    "torch",
+    "miditok",
+    "symusic",
+    "huggingface_hub",
+]
+
 [project.scripts]
 ableton-mcp-pro = "MCP_Server.server:main"
 
