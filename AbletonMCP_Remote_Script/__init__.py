@@ -243,6 +243,10 @@ class AbletonMCP(ControlSurface):
                 track_index = params.get("track_index", 0)
                 clip_index = params.get("clip_index", 0)
                 response["result"] = self._get_clip_notes(track_index, clip_index)
+            elif command_type == "get_arrangement_clip_notes":
+                track_index = params.get("track_index", 0)
+                arrangement_clip_index = params.get("arrangement_clip_index", 0)
+                response["result"] = self._get_arrangement_clip_notes(track_index, arrangement_clip_index)
             elif command_type == "get_clip_envelope":
                 track_index = params.get("track_index", 0)
                 clip_index = params.get("clip_index", 0)
@@ -256,7 +260,8 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._record_arrangement(sections, start_time)
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
-                                 "create_arrangement_midi_clip", "add_notes_to_clip", "set_clip_name",
+                                 "create_arrangement_midi_clip", "delete_arrangement_clip",
+                                 "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "play_arrangement",
                                  "load_browser_item",
@@ -310,6 +315,10 @@ class AbletonMCP(ControlSurface):
                             length = params.get("length", 4.0)
                             notes = params.get("notes", None)
                             result = self._create_arrangement_midi_clip(track_index, time, length, notes)
+                        elif command_type == "delete_arrangement_clip":
+                            track_index = params.get("track_index", 0)
+                            arrangement_clip_index = params.get("arrangement_clip_index", 0)
+                            result = self._delete_arrangement_clip(track_index, arrangement_clip_index)
                         elif command_type == "add_notes_to_clip":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -1269,6 +1278,69 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error getting clip notes: " + str(e))
             raise
 
+    def _get_arrangement_clip_notes(self, track_index, arrangement_clip_index):
+        """Get all notes from a MIDI clip in the arrangement view (by index in track.arrangement_clips)."""
+        try:
+            track = self._song.tracks[track_index]
+            if not hasattr(track, 'arrangement_clips'):
+                raise Exception("Track has no arrangement_clips")
+            clips = list(track.arrangement_clips)
+            if arrangement_clip_index < 0 or arrangement_clip_index >= len(clips):
+                raise IndexError("Arrangement clip index out of range")
+            clip = clips[arrangement_clip_index]
+            if not clip.is_midi_clip:
+                raise Exception("Not a MIDI clip")
+            notes = clip.get_notes_extended(from_pitch=0, pitch_span=128, from_time=0, time_span=clip.length)
+            note_list = []
+            for note in notes:
+                note_list.append({
+                    "pitch": note.pitch,
+                    "start_time": note.start_time,
+                    "duration": note.duration,
+                    "velocity": note.velocity,
+                    "mute": note.mute,
+                })
+            return {
+                "track_index": track_index,
+                "arrangement_clip_index": arrangement_clip_index,
+                "clip_name": clip.name,
+                "start_time": float(clip.start_time) if hasattr(clip, 'start_time') else 0,
+                "length": clip.length,
+                "note_count": len(note_list),
+                "notes": note_list,
+            }
+        except Exception as e:
+            self.log_message("Error getting arrangement clip notes: " + str(e))
+            raise
+
+    def _delete_arrangement_clip(self, track_index, arrangement_clip_index):
+        """Delete an arrangement clip by track + index in track.arrangement_clips."""
+        try:
+            track = self._song.tracks[track_index]
+            if not hasattr(track, 'arrangement_clips'):
+                raise Exception("Track has no arrangement_clips")
+            clips = list(track.arrangement_clips)
+            if arrangement_clip_index < 0 or arrangement_clip_index >= len(clips):
+                raise IndexError("Arrangement clip index out of range")
+            clip = clips[arrangement_clip_index]
+            start = float(clip.start_time) if hasattr(clip, 'start_time') else 0.0
+            end = float(clip.end_time) if hasattr(clip, 'end_time') else start + clip.length
+            # Live exposes Track.delete_clip(clip) on most versions; fall back to time range.
+            if hasattr(track, 'delete_clip'):
+                track.delete_clip(clip)
+            elif hasattr(self._song, 'delete_arrangement_clip'):
+                self._song.delete_arrangement_clip(track, start, end)
+            else:
+                raise Exception("No delete arrangement clip method available on this Live version")
+            return {
+                "track_index": track_index,
+                "deleted_index": arrangement_clip_index,
+                "remaining_count": len(track.arrangement_clips),
+            }
+        except Exception as e:
+            self.log_message("Error deleting arrangement clip: " + str(e))
+            raise
+
     def _set_track_arm(self, track_index, arm):
         """Set track arm state"""
         try:
@@ -1649,8 +1721,10 @@ class AbletonMCP(ControlSurface):
                 raise Exception("Live version does not support Track.create_midi_clip; need Live 11+")
 
             start = float(time)
-            end = start + float(length)
-            clip = track.create_midi_clip(start, end)
+            length_val = float(length)
+            # Live's Track.create_midi_clip takes (start_time, length) in beats,
+            # not (start_time, end_time) despite some docs suggesting otherwise.
+            clip = track.create_midi_clip(start, length_val)
 
             note_count = 0
             if notes and clip is not None:

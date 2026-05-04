@@ -104,7 +104,8 @@ class AbletonConnection:
         is_modifying_command = command_type in [
             "create_midi_track", "create_audio_track", "set_track_name",
             "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
-            "create_arrangement_midi_clip", "add_notes_to_clip", "set_clip_name",
+            "create_arrangement_midi_clip", "delete_arrangement_clip",
+            "add_notes_to_clip", "set_clip_name",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
             "batch_set_device_parameters",
             "start_playback", "stop_playback", "load_instrument_or_effect",
@@ -381,6 +382,47 @@ def create_audio_clip(ctx: Context, track_index: int, clip_index: int, file_path
     except Exception as e:
         logger.error(f"Error creating audio clip: {str(e)}")
         return f"Error creating audio clip: {str(e)}"
+
+@mcp.tool()
+def get_arrangement_clip_notes(ctx: Context, track_index: int, arrangement_clip_index: int) -> str:
+    """
+    Read MIDI notes from a clip in the arrangement view (not session view).
+
+    Parameters:
+    - track_index: Index of the track
+    - arrangement_clip_index: Index into track.arrangement_clips (0 = first arrangement clip on the track).
+                              Get the index from `get_arrangement_clips`.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_arrangement_clip_notes", {
+            "track_index": track_index,
+            "arrangement_clip_index": arrangement_clip_index,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting arrangement clip notes: {str(e)}")
+        return f"Error getting arrangement clip notes: {str(e)}"
+
+@mcp.tool()
+def delete_arrangement_clip(ctx: Context, track_index: int, arrangement_clip_index: int) -> str:
+    """
+    Delete a clip from the arrangement view by track + index.
+
+    Parameters:
+    - track_index: Index of the track
+    - arrangement_clip_index: Index into track.arrangement_clips (0 = first clip)
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("delete_arrangement_clip", {
+            "track_index": track_index,
+            "arrangement_clip_index": arrangement_clip_index,
+        })
+        return f"Deleted arrangement clip {result.get('deleted_index')} on track {track_index} ({result.get('remaining_count', 0)} remaining)"
+    except Exception as e:
+        logger.error(f"Error deleting arrangement clip: {str(e)}")
+        return f"Error deleting arrangement clip: {str(e)}"
 
 @mcp.tool()
 def create_arrangement_midi_clip(
