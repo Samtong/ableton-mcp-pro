@@ -243,6 +243,10 @@ class AbletonMCP(ControlSurface):
                 track_index = params.get("track_index", 0)
                 clip_index = params.get("clip_index", 0)
                 response["result"] = self._get_clip_notes(track_index, clip_index)
+            elif command_type == "get_arrangement_clip_notes":
+                track_index = params.get("track_index", 0)
+                arrangement_clip_index = params.get("arrangement_clip_index", 0)
+                response["result"] = self._get_arrangement_clip_notes(track_index, arrangement_clip_index)
             elif command_type == "get_clip_envelope":
                 track_index = params.get("track_index", 0)
                 clip_index = params.get("clip_index", 0)
@@ -252,9 +256,12 @@ class AbletonMCP(ControlSurface):
             elif command_type == "record_arrangement":
                 # Runs on socket thread with schedule_message for main thread ops
                 sections = params.get("sections", [])
-                response["result"] = self._record_arrangement(sections)
+                start_time = params.get("start_time", 0.0)
+                response["result"] = self._record_arrangement(sections, start_time)
             elif command_type in ["create_midi_track", "set_track_name",
-                                 "create_clip", "create_audio_clip", "add_notes_to_clip", "set_clip_name",
+                                 "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
+                                 "create_arrangement_midi_clip", "delete_arrangement_clip",
+                                 "add_notes_to_clip", "set_clip_name",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "play_arrangement",
                                  "load_browser_item",
@@ -296,6 +303,22 @@ class AbletonMCP(ControlSurface):
                             clip_index = params.get("clip_index", 0)
                             file_path = params.get("file_path", "")
                             result = self._create_audio_clip(track_index, clip_index, file_path)
+                        elif command_type == "create_arrangement_audio_clip":
+                            track_index = params.get("track_index", 0)
+                            file_path = params.get("file_path", "")
+                            time = params.get("time", 0.0)
+                            length = params.get("length", None)
+                            result = self._create_arrangement_audio_clip(track_index, file_path, time, length)
+                        elif command_type == "create_arrangement_midi_clip":
+                            track_index = params.get("track_index", 0)
+                            time = params.get("time", 0.0)
+                            length = params.get("length", 4.0)
+                            notes = params.get("notes", None)
+                            result = self._create_arrangement_midi_clip(track_index, time, length, notes)
+                        elif command_type == "delete_arrangement_clip":
+                            track_index = params.get("track_index", 0)
+                            arrangement_clip_index = params.get("arrangement_clip_index", 0)
+                            result = self._delete_arrangement_clip(track_index, arrangement_clip_index)
                         elif command_type == "add_notes_to_clip":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -884,14 +907,17 @@ class AbletonMCP(ControlSurface):
             clips = []
             if hasattr(track, 'arrangement_clips'):
                 for clip in track.arrangement_clips:
+                    is_audio = clip.is_audio_clip if hasattr(clip, 'is_audio_clip') else False
                     clip_info = {
                         "name": clip.name,
                         "start_time": clip.start_time if hasattr(clip, 'start_time') else 0,
                         "end_time": clip.end_time if hasattr(clip, 'end_time') else 0,
                         "length": clip.length,
                         "is_midi_clip": clip.is_midi_clip if hasattr(clip, 'is_midi_clip') else False,
-                        "is_audio_clip": clip.is_audio_clip if hasattr(clip, 'is_audio_clip') else False,
+                        "is_audio_clip": is_audio,
                     }
+                    if is_audio and hasattr(clip, 'file_path'):
+                        clip_info["file_path"] = clip.file_path
                     clips.append(clip_info)
             return {
                 "track_index": track_index,
@@ -912,13 +938,18 @@ class AbletonMCP(ControlSurface):
                 clips = []
                 if hasattr(track, 'arrangement_clips'):
                     for clip in track.arrangement_clips:
-                        clips.append({
+                        is_audio = clip.is_audio_clip if hasattr(clip, 'is_audio_clip') else False
+                        clip_info = {
                             "name": clip.name,
                             "start_time": clip.start_time if hasattr(clip, 'start_time') else 0,
                             "end_time": clip.end_time if hasattr(clip, 'end_time') else 0,
                             "length": clip.length,
                             "is_midi_clip": clip.is_midi_clip if hasattr(clip, 'is_midi_clip') else False,
-                        })
+                            "is_audio_clip": is_audio,
+                        }
+                        if is_audio and hasattr(clip, 'file_path'):
+                            clip_info["file_path"] = clip.file_path
+                        clips.append(clip_info)
                 if clips:
                     tracks_data.append({
                         "track_index": i,
@@ -959,9 +990,10 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error deleting scene: " + str(e))
             raise
 
-    def _record_arrangement(self, sections):
+    def _record_arrangement(self, sections, start_time=0.0):
         """Record session clips into arrangement by firing scenes at timed intervals.
         sections: list of {"scene_index": int, "bars": int}
+        start_time: arrangement position (in beats) to begin recording from. Default 0.
 
         Uses polling with fire-and-forget scene fires (no round-trip wait).
         clip_trigger_quantization=4 (1 Bar) snaps fires to bar boundaries.
@@ -1019,13 +1051,13 @@ class AbletonMCP(ControlSurface):
                 do_on_main(lambda: setattr(self._song, 'back_to_arranger', True))
                 time_module.sleep(0.05)
 
-                # Seek to start
+                # Seek to start_time
                 def seek_start():
-                    self._song.current_song_time = 0.0
+                    self._song.current_song_time = start_time
                     for _ in range(5):
-                        if abs(self._song.current_song_time) < 0.5:
+                        if abs(self._song.current_song_time - start_time) < 0.5:
                             break
-                        self._song.current_song_time = 0.0
+                        self._song.current_song_time = start_time
                 do_on_main(seek_start)
                 time_module.sleep(0.05)
 
@@ -1062,7 +1094,7 @@ class AbletonMCP(ControlSurface):
                     self.log_message("Recording section {0}: scene {1} ({2}) for {3} bars".format(
                         i + 1, si, scene_name[0], bars))
 
-                    target_beat = (total_bars + bars) * beats_per_bar
+                    target_beat = start_time + (total_bars + bars) * beats_per_bar
                     next_section = sections[i + 1] if i + 1 < len(sections) else None
                     next_fired = [False]
 
@@ -1244,6 +1276,69 @@ class AbletonMCP(ControlSurface):
             }
         except Exception as e:
             self.log_message("Error getting clip notes: " + str(e))
+            raise
+
+    def _get_arrangement_clip_notes(self, track_index, arrangement_clip_index):
+        """Get all notes from a MIDI clip in the arrangement view (by index in track.arrangement_clips)."""
+        try:
+            track = self._song.tracks[track_index]
+            if not hasattr(track, 'arrangement_clips'):
+                raise Exception("Track has no arrangement_clips")
+            clips = list(track.arrangement_clips)
+            if arrangement_clip_index < 0 or arrangement_clip_index >= len(clips):
+                raise IndexError("Arrangement clip index out of range")
+            clip = clips[arrangement_clip_index]
+            if not clip.is_midi_clip:
+                raise Exception("Not a MIDI clip")
+            notes = clip.get_notes_extended(from_pitch=0, pitch_span=128, from_time=0, time_span=clip.length)
+            note_list = []
+            for note in notes:
+                note_list.append({
+                    "pitch": note.pitch,
+                    "start_time": note.start_time,
+                    "duration": note.duration,
+                    "velocity": note.velocity,
+                    "mute": note.mute,
+                })
+            return {
+                "track_index": track_index,
+                "arrangement_clip_index": arrangement_clip_index,
+                "clip_name": clip.name,
+                "start_time": float(clip.start_time) if hasattr(clip, 'start_time') else 0,
+                "length": clip.length,
+                "note_count": len(note_list),
+                "notes": note_list,
+            }
+        except Exception as e:
+            self.log_message("Error getting arrangement clip notes: " + str(e))
+            raise
+
+    def _delete_arrangement_clip(self, track_index, arrangement_clip_index):
+        """Delete an arrangement clip by track + index in track.arrangement_clips."""
+        try:
+            track = self._song.tracks[track_index]
+            if not hasattr(track, 'arrangement_clips'):
+                raise Exception("Track has no arrangement_clips")
+            clips = list(track.arrangement_clips)
+            if arrangement_clip_index < 0 or arrangement_clip_index >= len(clips):
+                raise IndexError("Arrangement clip index out of range")
+            clip = clips[arrangement_clip_index]
+            start = float(clip.start_time) if hasattr(clip, 'start_time') else 0.0
+            end = float(clip.end_time) if hasattr(clip, 'end_time') else start + clip.length
+            # Live exposes Track.delete_clip(clip) on most versions; fall back to time range.
+            if hasattr(track, 'delete_clip'):
+                track.delete_clip(clip)
+            elif hasattr(self._song, 'delete_arrangement_clip'):
+                self._song.delete_arrangement_clip(track, start, end)
+            else:
+                raise Exception("No delete arrangement clip method available on this Live version")
+            return {
+                "track_index": track_index,
+                "deleted_index": arrangement_clip_index,
+                "remaining_count": len(track.arrangement_clips),
+            }
+        except Exception as e:
+            self.log_message("Error deleting arrangement clip: " + str(e))
             raise
 
     def _set_track_arm(self, track_index, arm):
@@ -1607,6 +1702,104 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error creating clip: " + str(e))
             raise
     
+    def _create_arrangement_midi_clip(self, track_index, time, length, notes=None):
+        """Create a MIDI clip in the arrangement view at a given position with optional notes.
+
+        Uses Live 11+ Track.create_midi_clip(start_time, end_time) API.
+        notes: optional list of note dicts to seed the clip with.
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if not track.has_midi_input:
+                raise Exception("Track {0} is not a MIDI track".format(track_index))
+
+            if not hasattr(track, 'create_midi_clip'):
+                raise Exception("Live version does not support Track.create_midi_clip; need Live 11+")
+
+            start = float(time)
+            length_val = float(length)
+            # Live's Track.create_midi_clip takes (start_time, length) in beats,
+            # not (start_time, end_time) despite some docs suggesting otherwise.
+            clip = track.create_midi_clip(start, length_val)
+
+            note_count = 0
+            if notes and clip is not None:
+                live_notes = []
+                for n in notes:
+                    pitch = n.get("pitch", 60)
+                    start_time = n.get("start_time", 0.0)
+                    duration = n.get("duration", 0.25)
+                    velocity = n.get("velocity", 100)
+                    mute = n.get("mute", False)
+                    live_notes.append((pitch, start_time, duration, velocity, mute))
+                clip.set_notes(tuple(live_notes))
+                note_count = len(live_notes)
+
+            # Find this clip's index in arrangement_clips so caller can refer to it later
+            arrangement_index = -1
+            try:
+                for i, ac in enumerate(track.arrangement_clips):
+                    if abs(float(ac.start_time) - start) < 0.001:
+                        arrangement_index = i
+                        break
+            except Exception:
+                pass
+
+            return {
+                "track_index": track_index,
+                "start_time": start,
+                "length": float(length),
+                "note_count": note_count,
+                "arrangement_clip_index": arrangement_index,
+                "name": clip.name if clip else "",
+            }
+        except Exception as e:
+            self.log_message("Error creating arrangement MIDI clip: " + str(e))
+            raise
+
+    def _create_arrangement_audio_clip(self, track_index, file_path, time, length=None):
+        """Create an audio clip from a file path in the arrangement view at a given position.
+
+        Uses Live 11+ Track.create_audio_clip(file_path, position) API.
+        length is optional - if provided, the clip is trimmed/looped to that length.
+        """
+        try:
+            if track_index < 0 or track_index >= len(self._song.tracks):
+                raise IndexError("Track index out of range")
+
+            track = self._song.tracks[track_index]
+
+            if not track.has_audio_input:
+                raise Exception("Track {0} is not an audio track".format(track_index))
+
+            if not hasattr(track, 'create_audio_clip'):
+                raise Exception("Live version does not support Track.create_audio_clip; need Live 11+")
+
+            # Live 11+ API: create_audio_clip(file_path, position) returns the new Clip
+            clip = track.create_audio_clip(file_path, float(time))
+
+            if length is not None and clip is not None:
+                try:
+                    clip.end_time = float(time) + float(length)
+                except Exception:
+                    pass  # length adjustment is best-effort
+
+            result = {
+                "track_index": track_index,
+                "file_path": file_path,
+                "start_time": float(time),
+                "length": clip.length if clip else 0,
+                "name": clip.name if clip else "",
+            }
+            return result
+        except Exception as e:
+            self.log_message("Error creating arrangement audio clip: " + str(e))
+            raise
+
     def _create_audio_clip(self, track_index, clip_index, file_path):
         """Create an audio clip from a file path in a clip slot on an audio track."""
         try:
