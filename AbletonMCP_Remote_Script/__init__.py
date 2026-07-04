@@ -227,6 +227,11 @@ class AbletonMCP(ControlSurface):
             elif command_type == "get_track_info":
                 track_index = params.get("track_index", 0)
                 response["result"] = self._get_track_info(track_index)
+            elif command_type == "get_track_output_meter":
+                track_index = params.get("track_index", 0)
+                duration_ms = params.get("duration_ms", 2000)
+                interval_ms = params.get("interval_ms", 25)
+                response["result"] = self._get_track_output_meter(track_index, duration_ms, interval_ms)
             # Commands that modify Live's state should be scheduled on the main thread
             elif command_type == "get_device_parameters":
                 track_index = params.get("track_index", 0)
@@ -239,6 +244,8 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._get_arrangement_clips(track_index)
             elif command_type == "get_full_arrangement":
                 response["result"] = self._get_full_arrangement()
+            elif command_type == "get_locators":
+                response["result"] = self._get_locators()
             elif command_type == "get_clip_notes":
                 track_index = params.get("track_index", 0)
                 clip_index = params.get("clip_index", 0)
@@ -278,7 +285,8 @@ class AbletonMCP(ControlSurface):
                                  "delete_device", "duplicate_track", "set_clip_loop",
                                  "set_track_arm", "set_send_level", "set_time_signature",
                                  "set_metronome", "set_clip_envelope", "clear_clip_envelope",
-                                 "undo", "redo"]:
+                                 "undo", "redo", "ensure_cue_at_current_time", "remove_cue_at_current_time",
+                                 "rename_cue_at_current_time"]:
                 # Use a thread-safe approach with a response queue
                 response_queue = queue.Queue()
                 
@@ -476,6 +484,14 @@ class AbletonMCP(ControlSurface):
                             result = self._undo()
                         elif command_type == "redo":
                             result = self._redo()
+                        elif command_type == "ensure_cue_at_current_time":
+                            name = params.get("name", "")
+                            result = self._ensure_cue_at_current_time(name)
+                        elif command_type == "remove_cue_at_current_time":
+                            result = self._remove_cue_at_current_time()
+                        elif command_type == "rename_cue_at_current_time":
+                            name = params.get("name", "")
+                            result = self._rename_cue_at_current_time(name)
 
                         # Put the result in the queue
                         response_queue.put({"status": "success", "result": result})
@@ -608,7 +624,74 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error getting track info: " + str(e))
             raise
-    
+
+    def _get_track_output_meter(self, track_index, duration_ms=2000, interval_ms=25):
+        """Poll a track's output meter and return the peak observed over the window.
+
+        Note: Live's output_meter_* properties are RMS post-fader (linear 0.0-1.0),
+        not peak-meter values — absolute readings will be lower than a peak meter.
+        Use this for *relative* calibration between tracks, not for absolute dBFS.
+
+        Synchronous polling on the socket thread (no listener). Supports master (-1)
+        and return tracks (-2, -3, ...). For MIDI tracks we also poll
+        output_meter_level (mono signal indicator); audio/master/return use L/R.
+        """
+        try:
+            track = self._get_track(track_index)
+            # Clamp sane bounds so a runaway call cannot block the socket thread
+            duration_ms = max(50, min(int(duration_ms), 30000))
+            interval_ms = max(5, min(int(interval_ms), 500))
+            interval_s = interval_ms / 1000.0
+            end_time = time.time() + (duration_ms / 1000.0)
+
+            is_midi = bool(getattr(track, "has_midi_input", False))
+            has_lr = hasattr(track, "output_meter_left") and hasattr(track, "output_meter_right")
+
+            peak_left = 0.0
+            peak_right = 0.0
+            peak_level = 0.0
+            samples = 0
+            while time.time() < end_time:
+                if has_lr:
+                    l = float(track.output_meter_left)
+                    r = float(track.output_meter_right)
+                    if l > peak_left:
+                        peak_left = l
+                    if r > peak_right:
+                        peak_right = r
+                if is_midi and hasattr(track, "output_meter_level"):
+                    lvl = float(track.output_meter_level)
+                    if lvl > peak_level:
+                        peak_level = lvl
+                samples += 1
+                time.sleep(interval_s)
+
+            peak_lin = max(peak_left, peak_right, peak_level)
+            # Use -120 dB as the noise-floor sentinel so the value stays JSON-safe
+            # (json strict mode chokes on -Infinity). -120 dB is well below anything audible.
+            if peak_lin > 0.0:
+                import math
+                peak_db = 20.0 * math.log10(peak_lin)
+            else:
+                peak_db = -120.0
+
+            return {
+                "track_index": track_index,
+                "track_name": track.name,
+                "is_midi": is_midi,
+                "peak_left": peak_left,
+                "peak_right": peak_right,
+                "peak_level": peak_level,
+                "peak_linear": peak_lin,
+                "peak_db": peak_db,
+                "samples": samples,
+                "duration_ms": duration_ms,
+                "interval_ms": interval_ms,
+            }
+        except Exception as e:
+            self.log_message("Error polling output meter: " + str(e))
+            raise
+
     def _get_track(self, track_index):
         """Get a track by index. Use -1 for master track, -2/-3/etc for return tracks."""
         if track_index == -1:
@@ -677,6 +760,79 @@ class AbletonMCP(ControlSurface):
             }
         except Exception as e:
             self.log_message("Error getting arrangement info: " + str(e))
+            raise
+
+    def _get_locators(self):
+        """List all arrangement locators (cue points), sorted by time"""
+        try:
+            return {
+                "locators": [
+                    {"time": cp.time, "name": cp.name}
+                    for cp in sorted(self._song.cue_points, key=lambda cp: cp.time)
+                ]
+            }
+        except Exception as e:
+            self.log_message("Error getting locators: " + str(e))
+            raise
+
+    def _find_cue_point(self, time, tolerance=0.1):
+        for cp in self._song.cue_points:
+            if abs(cp.time - time) < tolerance:
+                return cp
+        return None
+
+    def _ensure_cue_at_current_time(self, name):
+        """Create a cue point at current_song_time if none exists there yet.
+        Does NOT rename it - renaming a just-created cue point in the same
+        command intermittently fails ("can't set attribute"), the same class
+        of engine-lag bug as current_song_time. Rename separately via
+        _rename_cue_at_current_time in a follow-up command."""
+        try:
+            pos = self._song.current_song_time
+            cp = self._find_cue_point(pos)
+            if cp is None:
+                self._song.set_or_delete_cue()
+            return self._get_locators()
+        except Exception as e:
+            self.log_message("Error ensuring cue: " + str(e))
+            raise
+
+    def _rename_cue_at_current_time(self, name):
+        """Rename the cue point at current_song_time, if one exists there.
+        Must run as its own command, after the cue was created by a prior
+        ensure_cue_at_current_time call - see its docstring."""
+        try:
+            pos = self._song.current_song_time
+            cp = self._find_cue_point(pos)
+            if cp is None or not name:
+                return self._get_locators()
+            try:
+                cp.name = name
+            except AttributeError as e:
+                self.log_message("cp.name assignment failed: " + str(e))
+                self.log_message("type(cp): " + str(type(cp)))
+                self.log_message("dir(cp): " + str(dir(cp)))
+                if hasattr(cp, "set_name"):
+                    cp.set_name(name)
+                    self.log_message("Renamed via cp.set_name() instead")
+                else:
+                    raise
+            return self._get_locators()
+        except Exception as e:
+            self.log_message("Error renaming cue: " + str(e))
+            raise
+
+    def _remove_cue_at_current_time(self):
+        """Delete the cue point at current_song_time, if one exists there.
+        Must run as its own command - see _ensure_cue_at_current_time."""
+        try:
+            pos = self._song.current_song_time
+            cp = self._find_cue_point(pos)
+            if cp is not None:
+                self._song.set_or_delete_cue()
+            return self._get_locators()
+        except Exception as e:
+            self.log_message("Error removing cue: " + str(e))
             raise
 
     def _fire_scene(self, scene_index):
