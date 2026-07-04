@@ -120,7 +120,8 @@ class AbletonConnection:
             "delete_device", "duplicate_track", "set_clip_loop",
             "set_track_arm", "set_send_level", "set_time_signature", "set_metronome",
             "set_clip_envelope", "clear_clip_envelope",
-            "undo", "redo"
+            "undo", "redo", "ensure_cue_at_current_time", "remove_cue_at_current_time",
+            "rename_cue_at_current_time"
         ]
         
         try:
@@ -138,6 +139,10 @@ class AbletonConnection:
             # Set timeout based on command type
             if command_type == "record_arrangement":
                 timeout = 600.0  # 10 minutes for arrangement recording
+            elif command_type == "get_track_output_meter":
+                # Polling time + headroom for serialization
+                duration_ms = (params or {}).get("duration_ms", 2000)
+                timeout = max(10.0, (duration_ms / 1000.0) + 5.0)
             elif is_modifying_command:
                 timeout = 15.0
             else:
@@ -293,7 +298,7 @@ def get_session_info(ctx: Context) -> str:
 def get_track_info(ctx: Context, track_index: int) -> str:
     """
     Get detailed information about a specific track in Ableton.
-    
+
     Parameters:
     - track_index: The index of the track to get information about
     """
@@ -304,6 +309,45 @@ def get_track_info(ctx: Context, track_index: int) -> str:
     except Exception as e:
         logger.error(f"Error getting track info from Ableton: {str(e)}")
         return f"Error getting track info: {str(e)}"
+
+@mcp.tool()
+def get_track_output_meter(
+    ctx: Context,
+    track_index: int,
+    duration_ms: int = 2000,
+    interval_ms: int = 25,
+) -> str:
+    """
+    Poll a track's output meter and return the PEAK observed over a window.
+
+    The Live API exposes output_meter_* as RMS post-fader values (linear 0..1),
+    not peak-meter values — absolute readings are lower than a peak meter would
+    show. Use this for RELATIVE calibration between tracks (Utility gain offsets),
+    not as an absolute dBFS reference.
+
+    Polling is synchronous: the call blocks for ~duration_ms while Ableton plays.
+    Start playback (and solo the track you're measuring) BEFORE calling this.
+
+    Parameters:
+    - track_index: Track index (0+, -1 for master, -2/-3 for returns)
+    - duration_ms: Polling window in ms (clamped 50..30000). Default 2000.
+    - interval_ms: Sampling interval in ms (clamped 5..500). Default 25.
+
+    Returns JSON with peak_left, peak_right, peak_level (MIDI), peak_linear,
+    peak_db (sentinel -120 if silence), samples taken, and the actual window
+    used after clamping.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_track_output_meter", {
+            "track_index": track_index,
+            "duration_ms": duration_ms,
+            "interval_ms": interval_ms,
+        })
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error polling output meter: {str(e)}")
+        return f"Error polling output meter: {str(e)}"
 
 @mcp.tool()
 def create_midi_track(ctx: Context, index: int = -1) -> str:
@@ -962,6 +1006,69 @@ def get_arrangement_info(ctx: Context) -> str:
     except Exception as e:
         logger.error(f"Error getting arrangement info: {str(e)}")
         return f"Error getting arrangement info: {str(e)}"
+
+@mcp.tool()
+def get_locators(ctx: Context) -> str:
+    """List all arrangement locators (cue points/markers), sorted by time in beats."""
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_locators")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting locators: {str(e)}")
+        return f"Error getting locators: {str(e)}"
+
+def _goto_song_time(ableton, time: float):
+    """Move the arrangement playhead and confirm it landed. current_song_time is
+    applied asynchronously by Live's engine, so the value a set_song_time call
+    hands back can still be optimistic/stale - confirm with a separate, later
+    get_arrangement_info round trip instead of trusting that same call's return."""
+    for _ in range(8):
+        ableton.send_command("set_song_time", {"time": time})
+        info = ableton.send_command("get_arrangement_info")
+        if abs(info.get("current_song_time", -1e9) - time) < 0.01:
+            return
+    raise Exception(f"Could not move playhead to beat {time}")
+
+@mcp.tool()
+def add_locator(ctx: Context, time: float, name: str = "") -> str:
+    """
+    Add a locator (cue point / marker) in the Arrangement view at a given position.
+    Useful for marking song sections (e.g. "Intro", "Drop", "Breakdown").
+
+    Parameters:
+    - time: Position in beats (0.0 = start, 4.0 = bar 2, etc.)
+    - name: Label for the locator (e.g. "House - Groove", "Transition", "Techno - Drop")
+    """
+    try:
+        ableton = get_ableton_connection()
+        _goto_song_time(ableton, time)
+        ableton.send_command("ensure_cue_at_current_time", {})
+        if name:
+            _goto_song_time(ableton, time)
+            ableton.send_command("rename_cue_at_current_time", {"name": name})
+        label = f" ({name})" if name else ""
+        return f"Added locator at beat {time:.1f}{label}"
+    except Exception as e:
+        logger.error(f"Error adding locator: {str(e)}")
+        return f"Error adding locator: {str(e)}"
+
+@mcp.tool()
+def delete_locator(ctx: Context, time: float) -> str:
+    """
+    Delete the locator (cue point) nearest to a given position in the Arrangement view.
+
+    Parameters:
+    - time: Position in beats of the locator to remove
+    """
+    try:
+        ableton = get_ableton_connection()
+        _goto_song_time(ableton, time)
+        ableton.send_command("remove_cue_at_current_time")
+        return f"Deleted locator near beat {time:.1f}"
+    except Exception as e:
+        logger.error(f"Error deleting locator: {str(e)}")
+        return f"Error deleting locator: {str(e)}"
 
 @mcp.tool()
 def fire_scene(ctx: Context, scene_index: int) -> str:
