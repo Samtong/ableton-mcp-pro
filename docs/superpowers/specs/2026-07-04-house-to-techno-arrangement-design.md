@@ -16,15 +16,15 @@ House→Techno transition.
 
 | Track | Index | Role |
 |---|---|---|
-| KICK | 10 | Main kick (steady 4-on-the-floor loops) |
-| KICK AD | 11 | Additional/layered kick (reinforcement for techno) |
+| KICK | 11 | Main kick — **now merged with the former KICK AD track** (both the main 4-on-the-floor loop and the layered/reinforcement kick live here as separate clips on this one track) |
 | CLAP | 5 | Clap hits |
 | SNARE AD H | 6 | Snare — used for build rolls |
 | CHH | 1 | Closed hi-hat |
 | OHH | 3 | Open hi-hat accent (one short clip) |
 | RIDE | 2 | Ride cymbal — main techno percussive element |
 | SYNTH | 8 | Chords/stabs (house) + acid pedal C/G (techno bassline) |
-| 0, 4, 7, 9 | — | Group/folder tracks (Hats, Snares/Claps, Synths, Kicks) — no clips of their own |
+| SYNTH + SQUARE | 9 | Ignored for this build — muted, not yet ready |
+| 0, 4, 7, 10 | — | Group/folder tracks — no clips of their own |
 
 ## Decisions
 
