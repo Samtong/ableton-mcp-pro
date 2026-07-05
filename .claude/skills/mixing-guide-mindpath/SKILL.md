@@ -84,6 +84,13 @@ Ce sont des **niveaux résultants**, pas des positions de fader : pars du RMS me
 3. **Anti-boomy** : kick >35 % d'énergie en 100–400 Hz → EQ type Pultec : bell large +1.5 dB sur la fondamentale mesurée, bell moyen -2.5 dB sur le pic 100–400 détecté.
 4. **Clé du kick** : fondamentale hors 41–59 Hz → ⚠ signalée, pas de repitch (production, pas mix).
 5. **Glue optionnelle** Low End : Saturator Soft Sine, Drive ≤ 3 dB, output compensé pour RMS constant.
+6. **Trou dans le low end (kick seul, pas de sub soutenu)** — problème de **production**, pas de mix, mais fréquent et bloquant pour l'octave 63 Hz de `mix_tests.py`. Remède zéro-synthèse : `scripts/make_rumble.py`.
+   - Commande type (un rumble par tempo/kick de la track — house et techno ont souvent des kicks + tempos différents) :
+     `python scripts/make_rumble.py <kick.wav> -o rumble.wav --bpm <bpm> --loop-beats 16 --sustain --gain-db -10`
+   - Le script : extrait le sub du kick, **détecte auto le point de décroissance du kick** et remplit **le silence** entre les kicks (pas de superposition = pas d'annulation de phase) ; **`--sustain`** = sub continu (choisit auto le grain au pitch le plus stable → évite le wobble/"fiou" des kicks à longue descente de pitch) ; sortie mono, fondamentale = celle du kick (vérifiée dans le JSON), niveau posé par `--gain-db` (~-10 dBFS, la balance fine reste le fader).
+   - `--loop-beats N` sort **un seul fichier loop** (tail tuilée à chaque beat) à poser back-to-back via `create_arrangement_audio_clip` sur la piste SUB, aligné au 4-on-floor (les positions kick = beats entiers ; sauter les breaks). Régler SUB **3–6 dB sous le kick**, vérifier à l'Occular Scope /LOW que la transition kick→rumble→kick est **continue et en phase** (cible du cours).
+   - **Ghost kicks masqués par le sub** → sidechain. Le routing de la source sidechain (`Audio From → KICK`) **n'est pas réglable via MCP** (comme toute entrée). Deux options : (a) charger + configurer un **Compressor sur SUB** via MCP (S/C On, ratio ~0.9, attack rapide, release ~0.3, threshold à tuner au **mixage** = profondeur du pump) et laisser l'utilisateur faire le seul clic `Audio From → KICK` ; (b) **`--duck`** grave le ducking directement dans le fichier (détection des transients kick passe-hautée), sans routing — utile si zéro intervention voulue.
+   - Si la tail du kick est trop courte (`single_tail_s` < ~0.1 s) et `--sustain` insuffisant → sub sine synthétisé sur la fondamentale.
 
 ## Phase 3 — HIGH END
 
