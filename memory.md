@@ -74,3 +74,98 @@ few seconds per locator, much faster than fighting this further).
 
 Don't re-attempt `cp.name = x` fixes without new evidence — this was
 checked directly via `dir()` on a live object, not inferred from behavior.
+
+## ⚠️ NEVER drive arrangement RECORDING (Resampling → MIX_TEST) over MCP for the mixing render loop — it froze the transport AND destructively truncated the arrangement
+
+Learned the very hard way in a `mixing-guide-mindpath` session (2026-07-06). The
+skill's Red/Green step ("record the master to a MIX_TEST track set to input
+Resampling") driven over MCP went catastrophic:
+
+- After a few `set_record_mode` / `play_arrangement` / `stop_playback` /
+  `delete_arrangement_clip` cycles, **Live's transport froze** (playhead stopped
+  advancing; `get_arrangement_info` said `is_playing: true` but no audio
+  rendered) and the recorded clips came out **silent (−240 dBFS)** or truncated
+  to <1 s despite 45 s of wall-clock playback. An engine restart / long idle did
+  NOT recover it.
+- Far worse: the record/delete cycles **destructively cut the ENTIRE arrangement
+  at a fixed beat (~260) across ALL tracks** — the whole techno drop
+  (beats 304→432) was deleted on kick, sub, clap, hats and synth. So
+  `delete_arrangement_clip` (and/or arrangement-record punch-in) behaves like a
+  global *delete-time*, not a local clip delete. Only recovered because the user
+  had a pre-session `.als` backup.
+
+**Rules — do not repeat:**
+1. For the Red/Green loop, **use manual export from the start** (ask the user:
+   File → Export Audio, Rendered Track = Master, **Normalize OFF**, give you the
+   WAV path). Do **not** automate Resampling recording over MCP. This is the
+   skill's "Plan B" — treat it as Plan A.
+2. **Never** run rapid `record_mode`/`play`/`stop`/`delete_arrangement_clip`
+   cycles on a real project. There is no safe MCP "move arrangement clip" tool
+   either — clip timing nudges are the user's job (by ear).
+3. Restarting Ableton **clears undo history** → you cannot undo the truncation
+   afterwards. Recovery = the user's `.als` backups (project root + `Backup/`).
+   Find an intact one by `gzip`-decompressing the `.als` and regexing
+   `CurrentStart`/`CurrentEnd` values to see how far the arrangement extends.
+
+## Tempo automation makes transport position + metering unreadable over MCP
+
+On a set with tempo automation (e.g. 128→135 BPM), during playback:
+- `get_arrangement_info.current_song_time` returns **garbage/near-frozen** beat
+  values (jumps around, doesn't advance linearly).
+- `set_song_time` / `play_arrangement` **return-strings are wrong** (e.g. asked
+  305, echoed "403.4") — the actual set may still be correct; **confirm with a
+  separate `get_arrangement_info`** (same async gotcha as `current_song_time`
+  above).
+- `get_track_output_meter` returns **−120 dB constantly** — NOT a reliable
+  "is audio playing" indicator.
+
+Ground truth for "did audio actually render" = **the exported/recorded WAV on
+disk** (analyze with soundfile), nothing else.
+
+## MCP parameter mappings for mixing (verified this session)
+
+- **Group / Return / Main tracks**: `get_track_info` and `get_arrangement_clips`
+  **error** ("... have no Arm state / arrangement clips"). That's how you detect
+  a group. You can still read/write their **devices** via
+  `get_device_parameters(track, device_index)` (e.g. Utility+Bass Mono on a LOW
+  group works fine).
+- **`set_track_panning` expects 0.0–1.0** (0.5 = centre), NOT −1..1 — but
+  `get_track_info.panning` **reads back −1..1** (0 = centre). Set `0.575` → reads
+  `+0.15`. (Sending `-0.15` errors "Panning must be between 0.0 and 1.0".)
+- **EQ Eight** per band: `N Filter On A` / `N Filter Type A` / `N Frequency A` /
+  `N Gain A` / `N Resonance A`. Filter Type is quantised 0–7:
+  **0=48dB low-cut, 1=12dB low-cut, 2=low-shelf, 3=bell, 4=notch, 5=high-shelf,
+  6=12dB high-cut, 7=48dB high-cut.** Normalised `k/7` tends to **floor**
+  (0.1428→value 0); use `(k+0.5)/7` to land value `k` reliably.
+- **EQ Eight Frequency** is a raw 0–1 param (no Hz readback). Log map:
+  `normalised ≈ ln(Hz/10) / ln(2205)` (~10 Hz–22 kHz). 100 Hz≈0.30, 300 Hz≈0.44,
+  500 Hz≈0.51, 2 kHz≈0.69, 7 kHz≈0.85, 27 Hz≈0.13.
+- **Glue Compressor**: Ratio stepped (0=2:1, 1=4:1, 2=10:1). Attack/Release
+  stepped 0–6 (Attack value 6 = 30 ms; Release value 6 = Auto).
+- **Limiter**: Ceiling is a *sample* ceiling — inter-sample **true-peak
+  overshoots it by ~0.2–0.3 dB**, so set ceiling **−1.5** to keep true-peak
+  ≤ −1.0 dBTP. Integrated LUFS tracks the Limiter input **Gain ~1:1** (peaks
+  barely move LUFS) → `new_gain = gain + (target_LUFS − measured_LUFS)`.
+- **Loading a device appends to the end** of the chain. Master often already has
+  `Project Timer` (0) + `Monitoring Rack` (1); a LOW/BASS group often has a
+  `Monitoring Rack` (0). So your loaded device lands at index 2+ / 1+. Re-read
+  the chain; the `set_device_parameter` return echoes the resolved param name —
+  use it to confirm you hit the intended device/band.
+
+## Mixing lessons (mixing-guide-mindpath)
+
+- **Macro-dynamic test** needs the export window to include a **loudness
+  transition** (the entry into the drop), or a steady loop fails (<1.5 dB). But
+  don't drag in too much sparse intro — it dilutes the octave spectrum. Pick the
+  smallest window that has both full density AND one transition.
+- **Shared-track EQ conflicts are unsolvable by EQ.** If two sounds on the same
+  track need opposite treatment in the same band (here: a house lead too full at
+  500 Hz vs a techno acid too scooped at 500 Hz), no master/track EQ satisfies
+  both. Fix = **routing**: split them onto separate tracks (user does the
+  arrangement split; then EQ each independently). This was the whole unlock of
+  the mix.
+- **Simulate the Limiter offline** (numpy: apply gain, clip to ceiling, re-measure
+  LUFS/true-peak with pyloudnorm) on the last export before asking for a
+  re-export — predictions are close enough to save a manual-export round-trip.
+- True-peak ≤ −1 dBTP wants ceiling −1.5 (see Limiter note). LUFS premaster
+  target −14..−10; leave it conservative (~−13) for a real mastering pass.
