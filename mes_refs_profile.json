@@ -1,0 +1,81 @@
+{
+  "name": "mes_refs",
+  "octaves": {
+    "63": [
+      9.9,
+      14.9
+    ],
+    "125": [
+      5.2,
+      10.2
+    ],
+    "250": [
+      0.2,
+      5.2
+    ],
+    "500": [
+      -8.0,
+      -3.0
+    ],
+    "1000": [
+      -7.9,
+      -2.9
+    ],
+    "2000": [
+      -7.6,
+      -2.6
+    ],
+    "4000": [
+      -6.4,
+      -1.4
+    ],
+    "8000": [
+      -5.4,
+      -0.4
+    ]
+  },
+  "built_from": {
+    "/Users/sami-inc/Desktop/face_aaaa Project/refs/Crime Partners - Bounce On This_MASTER_24_FelixHamelmann.aif": {
+      "climax_at_s": 54.0,
+      "lufs_climax": -7.2,
+      "octaves_db": {
+        "63": 14.27,
+        "125": 9.17,
+        "250": 1.96,
+        "500": -7.08,
+        "1000": -7.35,
+        "2000": -4.65,
+        "4000": -3.55,
+        "8000": -2.78
+      }
+    },
+    "/Users/sami-inc/Desktop/face_aaaa Project/refs/Robert Hood - The Greatest Dancer - 135.mp3": {
+      "climax_at_s": 225.0,
+      "lufs_climax": -7.37,
+      "octaves_db": {
+        "63": 10.7,
+        "125": 6.55,
+        "250": 4.5,
+        "500": -3.86,
+        "1000": -5.57,
+        "2000": -5.56,
+        "4000": -2.82,
+        "8000": -3.94
+      }
+    },
+    "/Users/sami-inc/Desktop/face_aaaa Project/refs/02 - Save the Children.wav": {
+      "climax_at_s": 136.0,
+      "lufs_climax": -8.09,
+      "octaves_db": {
+        "63": 12.09,
+        "125": 7.5,
+        "250": 1.64,
+        "500": -5.45,
+        "1000": -3.39,
+        "2000": -5.04,
+        "4000": -5.32,
+        "8000": -2.03
+      }
+    }
+  }
+}
