@@ -577,7 +577,7 @@ class AbletonMCP(ControlSurface):
             
             # Get clip slots (master and return tracks have none)
             clip_slots = []
-            for slot_index, slot in enumerate(getattr(track, "clip_slots", [])):
+            for slot_index, slot in enumerate(self._safe(track, "clip_slots", []) or []):
                 clip_info = None
                 if slot.has_clip:
                     clip = slot.clip
@@ -623,12 +623,12 @@ class AbletonMCP(ControlSurface):
             result = {
                 "index": track_index,
                 "name": track.name,
-                "is_audio_track": getattr(track, "has_audio_input", False),
-                "is_midi_track": getattr(track, "has_midi_input", False),
-                "is_group_track": bool(getattr(track, "is_foldable", False)),
-                "mute": getattr(track, "mute", None),
-                "solo": getattr(track, "solo", None),
-                "arm": getattr(track, "arm", None),
+                "is_audio_track": bool(self._safe(track, "has_audio_input", False)),
+                "is_midi_track": bool(self._safe(track, "has_midi_input", False)),
+                "is_group_track": bool(self._safe(track, "is_foldable", False)),
+                "mute": self._safe(track, "mute"),
+                "solo": self._safe(track, "solo"),
+                "arm": self._safe(track, "arm"),
                 "volume": volume.value,
                 "volume_db": self._param_str(volume),
                 "panning": panning.value,
@@ -708,6 +708,20 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error polling output meter: " + str(e))
             raise
+
+    @staticmethod
+    def _safe(obj, name, default=None):
+        """Read an attribute that Live may refuse for this track kind.
+
+        Live raises its own exception (not AttributeError) from properties that
+        don't apply -- e.g. `arm` on a group/return/main track raises
+        "Main and Return Tracks have no 'Arm' state!" -- so getattr's default
+        does not cover it.
+        """
+        try:
+            return getattr(obj, name)
+        except Exception:
+            return default
 
     @staticmethod
     def _param_str(param):
