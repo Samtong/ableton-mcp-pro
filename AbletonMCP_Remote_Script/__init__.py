@@ -573,14 +573,11 @@ class AbletonMCP(ControlSurface):
     def _get_track_info(self, track_index):
         """Get information about a track"""
         try:
-            if track_index < 0 or track_index >= len(self._song.tracks):
-                raise IndexError("Track index out of range")
+            track = self._get_track(track_index)
             
-            track = self._song.tracks[track_index]
-            
-            # Get clip slots
+            # Get clip slots (master and return tracks have none)
             clip_slots = []
-            for slot_index, slot in enumerate(track.clip_slots):
+            for slot_index, slot in enumerate(getattr(track, "clip_slots", [])):
                 clip_info = None
                 if slot.has_clip:
                     clip = slot.clip
@@ -607,16 +604,36 @@ class AbletonMCP(ControlSurface):
                     "type": self._get_device_type(device)
                 })
             
+            # Sends (regular tracks only; the master track has none)
+            sends = []
+            try:
+                for send_index, send in enumerate(track.mixer_device.sends):
+                    sends.append({
+                        "index": send_index,
+                        "name": send.name,
+                        "value": send.value,
+                        "display_value": self._param_str(send)
+                    })
+            except Exception:
+                pass
+
+            volume = track.mixer_device.volume
+            panning = track.mixer_device.panning
+
             result = {
                 "index": track_index,
                 "name": track.name,
-                "is_audio_track": track.has_audio_input,
-                "is_midi_track": track.has_midi_input,
-                "mute": track.mute,
-                "solo": track.solo,
-                "arm": track.arm,
-                "volume": track.mixer_device.volume.value,
-                "panning": track.mixer_device.panning.value,
+                "is_audio_track": getattr(track, "has_audio_input", False),
+                "is_midi_track": getattr(track, "has_midi_input", False),
+                "is_group_track": bool(getattr(track, "is_foldable", False)),
+                "mute": getattr(track, "mute", None),
+                "solo": getattr(track, "solo", None),
+                "arm": getattr(track, "arm", None),
+                "volume": volume.value,
+                "volume_db": self._param_str(volume),
+                "panning": panning.value,
+                "panning_display": self._param_str(panning),
+                "sends": sends,
                 "clip_slots": clip_slots,
                 "devices": devices
             }
@@ -692,6 +709,17 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error polling output meter: " + str(e))
             raise
 
+    @staticmethod
+    def _param_str(param):
+        """Live's own display text for a parameter's current value (e.g. '-12.0 dB').
+
+        Returns None if the parameter has no string representation.
+        """
+        try:
+            return str(param.str_for_value(param.value))
+        except Exception:
+            return None
+
     def _get_track(self, track_index):
         """Get a track by index. Use -1 for master track, -2/-3/etc for return tracks."""
         if track_index == -1:
@@ -718,6 +746,7 @@ class AbletonMCP(ControlSurface):
             return {
                 "track_name": track.name,
                 "volume": vol_param.value,
+                "volume_db": self._param_str(vol_param),
                 "normalized_volume": volume
             }
         except Exception as e:
@@ -1526,9 +1555,12 @@ class AbletonMCP(ControlSurface):
             send.value = max(send.min, min(send.max, send.min + float(value) * (send.max - send.min)))
             return {
                 "track_index": track_index,
+                "track_name": track.name,
                 "send_index": send_index,
+                "send_name": send.name,
                 "value": value,
-                "actual_value": send.value
+                "actual_value": send.value,
+                "display_value": self._param_str(send)
             }
         except Exception as e:
             self.log_message("Error setting send level: " + str(e))
@@ -1717,6 +1749,7 @@ class AbletonMCP(ControlSurface):
                     "index": i,
                     "name": p.name,
                     "value": p.value,
+                    "display_value": self._param_str(p),
                     "normalized_value": norm_val,
                     "min": p.min,
                     "max": p.max,
@@ -1751,6 +1784,7 @@ class AbletonMCP(ControlSurface):
             return {
                 "parameter_name": parameter.name,
                 "value": parameter.value,
+                "display_value": self._param_str(parameter),
                 "normalized_value": value
             }
         except Exception as e:
@@ -1781,6 +1815,7 @@ class AbletonMCP(ControlSurface):
                     "index": p_idx,
                     "name": param.name,
                     "value": param.value,
+                    "display_value": self._param_str(param),
                     "normalized_value": val
                 })
             return {
