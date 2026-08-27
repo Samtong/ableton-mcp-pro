@@ -643,15 +643,24 @@ class AbletonMCP(ControlSurface):
             raise
 
     def _get_track_output_meter(self, track_index, duration_ms=2000, interval_ms=25):
-        """Poll a track's output meter and return the peak observed over the window.
+        """Observe a track's output meter over a window and return the peak seen.
 
-        Note: Live's output_meter_* properties are RMS post-fader (linear 0.0-1.0),
-        not peak-meter values — absolute readings will be lower than a peak meter.
-        Use this for *relative* calibration between tracks, not for absolute dBFS.
+        IMPORTANT — what this value is: Live's output_meter_* properties report the
+        *meter deflection*, not the signal level (see the Live Object Model docs).
+        The mapping from deflection to dBFS is Live's own meter warping, so
+        20*log10(deflection) is NOT dBFS. `peak_db` below is that naive conversion
+        and is kept only for backwards compatibility — treat it as an arbitrary
+        scale. For absolute levels, read Live's own peak-hold display.
 
-        Synchronous polling on the socket thread (no listener). Supports master (-1)
-        and return tracks (-2, -3, ...). For MIDI tracks we also poll
-        output_meter_level (mono signal indicator); audio/master/return use L/R.
+        Sampling: prefers listeners (`add_output_meter_left_listener`), so every
+        update Live pushes is captured. Polling from the socket thread only manages
+        ~10 Hz, which misses transient peaks and — measured on a techno mix —
+        produced readings inconsistent enough to invert the ranking of two scenes
+        whose true peaks differed by 0.4 dB. `sampling` in the result says which
+        path ran; `samples` counts meter updates seen (listener) or polls done.
+
+        Supports master (-1) and return tracks (-2, -3, ...). For MIDI tracks we
+        also watch output_meter_level (mono signal indicator).
         """
         try:
             track = self._get_track(track_index)
@@ -659,29 +668,66 @@ class AbletonMCP(ControlSurface):
             duration_ms = max(50, min(int(duration_ms), 30000))
             interval_ms = max(5, min(int(interval_ms), 500))
             interval_s = interval_ms / 1000.0
-            end_time = time.time() + (duration_ms / 1000.0)
+            duration_s = duration_ms / 1000.0
 
             is_midi = bool(getattr(track, "has_midi_input", False))
             has_lr = hasattr(track, "output_meter_left") and hasattr(track, "output_meter_right")
 
-            peak_left = 0.0
-            peak_right = 0.0
-            peak_level = 0.0
-            samples = 0
-            while time.time() < end_time:
-                if has_lr:
-                    l = float(track.output_meter_left)
-                    r = float(track.output_meter_right)
-                    if l > peak_left:
-                        peak_left = l
-                    if r > peak_right:
-                        peak_right = r
-                if is_midi and hasattr(track, "output_meter_level"):
-                    lvl = float(track.output_meter_level)
-                    if lvl > peak_level:
-                        peak_level = lvl
-                samples += 1
-                time.sleep(interval_s)
+            # peaks[0..2] = left, right, level; peaks[3] = update count.
+            # A list keeps the callbacks free of Python 2 `nonlocal`.
+            peaks = [0.0, 0.0, 0.0, 0]
+
+            def watch(slot, attr):
+                def _cb():
+                    try:
+                        v = float(getattr(track, attr))
+                    except Exception:
+                        return
+                    if v > peaks[slot]:
+                        peaks[slot] = v
+                    peaks[3] += 1
+                return _cb
+
+            wanted = []
+            if has_lr:
+                wanted.append((0, "output_meter_left"))
+                wanted.append((1, "output_meter_right"))
+            if is_midi and hasattr(track, "output_meter_level"):
+                wanted.append((2, "output_meter_level"))
+
+            attached = []
+            for slot, attr in wanted:
+                cb = watch(slot, attr)
+                try:
+                    getattr(track, "add_" + attr + "_listener")(cb)
+                    attached.append((attr, cb))
+                except Exception:
+                    pass
+
+            if attached:
+                sampling = "listener"
+                time.sleep(duration_s)
+                for attr, cb in attached:
+                    try:
+                        getattr(track, "remove_" + attr + "_listener")(cb)
+                    except Exception:
+                        pass
+            else:
+                # No listeners available: fall back to the old polling path.
+                sampling = "poll"
+                end_time = time.time() + duration_s
+                while time.time() < end_time:
+                    for slot, attr in wanted:
+                        try:
+                            v = float(getattr(track, attr))
+                        except Exception:
+                            continue
+                        if v > peaks[slot]:
+                            peaks[slot] = v
+                    peaks[3] += 1
+                    time.sleep(interval_s)
+
+            peak_left, peak_right, peak_level, samples = peaks[0], peaks[1], peaks[2], peaks[3]
 
             peak_lin = max(peak_left, peak_right, peak_level)
             # Use -120 dB as the noise-floor sentinel so the value stays JSON-safe
@@ -696,6 +742,7 @@ class AbletonMCP(ControlSurface):
                 "track_index": track_index,
                 "track_name": track.name,
                 "is_midi": is_midi,
+                "sampling": sampling,
                 "peak_left": peak_left,
                 "peak_right": peak_right,
                 "peak_level": peak_level,
