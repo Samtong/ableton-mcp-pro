@@ -9,6 +9,7 @@ Control Ableton Live through MCP tools. This project has two parts:
 
 - **Track indexing**: 0+ for regular tracks, `-1` for master, `-2`/`-3` for return A/B
 - **Parameter values**: Always normalized 0.0–1.0, regardless of actual range
+- **Normalized ↔ dB**: track volume is `dB = (pos − 0.85) × 40` (0.85 = 0 dB, 1.0 = +6 dB); a send is the same slope shifted to top out at 0 dB, `dB = (pos − 1.0) × 40`, and steepens below pos 0.40. Both verified against Live's display — but read `volume_db` / `display_value` back after writing rather than trusting the formula
 - **Clip positions**: In beats (4.0 = 1 bar at 4/4)
 - **MIDI notes**: pitch 0–127, velocity 0–127. Live names middle C (pitch 60) **C3**, so C1=36, C2=48, C4=72 — match Live's own display, not the C4=60 convention
 - **Arrangement is read-only** — can only populate via `record_arrangement` from session clips
