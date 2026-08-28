@@ -259,7 +259,8 @@ class AbletonMCP(ControlSurface):
                 clip_index = params.get("clip_index", 0)
                 device_index = params.get("device_index", 0)
                 parameter_index = params.get("parameter_index", 0)
-                response["result"] = self._get_clip_envelope(track_index, clip_index, device_index, parameter_index)
+                response["result"] = self._get_clip_envelope(track_index, clip_index, device_index, parameter_index,
+                                                             params.get("mixer_parameter", None))
             elif command_type == "record_arrangement":
                 # Runs on socket thread with schedule_message for main thread ops
                 sections = params.get("sections", [])
@@ -285,6 +286,7 @@ class AbletonMCP(ControlSurface):
                                  "delete_device", "duplicate_track", "set_clip_loop",
                                  "set_track_arm", "set_send_level", "set_time_signature",
                                  "set_metronome", "set_clip_envelope", "clear_clip_envelope",
+                                 "remove_notes_from_clip",
                                  "undo", "redo", "ensure_cue_at_current_time", "remove_cue_at_current_time",
                                  "rename_cue_at_current_time"]:
                 # Use a thread-safe approach with a response queue
@@ -473,13 +475,19 @@ class AbletonMCP(ControlSurface):
                             parameter_index = params.get("parameter_index", 0)
                             device_index = params.get("device_index", 0)
                             points = params.get("points", [])
-                            result = self._set_clip_envelope(track_index, clip_index, device_index, parameter_index, points)
+                            mixer_parameter = params.get("mixer_parameter", None)
+                            result = self._set_clip_envelope(track_index, clip_index, device_index, parameter_index, points, mixer_parameter)
+                        elif command_type == "remove_notes_from_clip":
+                            result = self._remove_notes_from_clip(
+                                params.get("track_index", 0), params.get("clip_index", 0),
+                                params.get("pitch", None), params.get("start_time", None),
+                                params.get("end_time", None))
                         elif command_type == "clear_clip_envelope":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
                             parameter_index = params.get("parameter_index", 0)
                             device_index = params.get("device_index", 0)
-                            result = self._clear_clip_envelope(track_index, clip_index, device_index, parameter_index)
+                            result = self._clear_clip_envelope(track_index, clip_index, device_index, parameter_index, params.get("mixer_parameter", None))
                         elif command_type == "undo":
                             result = self._undo()
                         elif command_type == "redo":
@@ -1649,7 +1657,80 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error setting metronome: " + str(e))
             raise
 
-    def _set_clip_envelope(self, track_index, clip_index, device_index, parameter_index, points):
+    @staticmethod
+    def _resolve_automatable(track, device_index, parameter_index, mixer_parameter=None):
+        """Pick the parameter an envelope targets: a device parameter, or a mixer one.
+
+        Live can automate volume, panning and sends inside a clip just like any device
+        parameter, but they live on track.mixer_device rather than in track.devices,
+        so they need their own lookup. `mixer_parameter` accepts "volume", "panning",
+        or a send as "send_a"/"send_b"/... or "send_0"/"send_1"/...
+        """
+        if mixer_parameter:
+            mixer = track.mixer_device
+            key = str(mixer_parameter).strip().lower().replace(" ", "_")
+            if key in ("volume", "vol"):
+                return mixer.volume
+            if key in ("panning", "pan"):
+                return mixer.panning
+            if key.startswith("send"):
+                token = key[4:].lstrip("_")
+                if token.isdigit():
+                    idx = int(token)
+                elif len(token) == 1 and token.isalpha():
+                    idx = ord(token) - ord("a")
+                else:
+                    raise ValueError("Cannot parse send from %r" % (mixer_parameter,))
+                sends = mixer.sends
+                if idx < 0 or idx >= len(sends):
+                    raise IndexError("Send index out of range (track has %d sends)" % len(sends))
+                return sends[idx]
+            raise ValueError("Unknown mixer parameter %r" % (mixer_parameter,))
+        device = track.devices[device_index]
+        return device.parameters[parameter_index]
+
+    def _remove_notes_from_clip(self, track_index, clip_index, pitch=None,
+                                start_time=None, end_time=None):
+        """Remove notes from a MIDI clip, optionally narrowed to a pitch and a time span.
+
+        Without a filter this clears the clip. There was previously no way to take a
+        note back out, so fixing a single wrong note meant rebuilding the whole clip.
+        """
+        try:
+            track = self._get_track(track_index)
+            clip_slot = track.clip_slots[clip_index]
+            if not clip_slot.has_clip:
+                raise Exception("No clip in slot")
+            clip = clip_slot.clip
+
+            from_pitch = 0 if pitch is None else int(pitch)
+            pitch_span = 128 if pitch is None else 1
+            from_time = 0.0 if start_time is None else float(start_time)
+            if end_time is None:
+                time_span = float(clip.length) if start_time is None else 0.001
+            else:
+                time_span = max(0.0, float(end_time) - from_time)
+
+            before = len(clip.get_notes(0, 0, clip.length, 128))
+            try:
+                clip.remove_notes_extended(from_pitch, pitch_span, from_time, time_span)
+            except AttributeError:
+                clip.remove_notes(from_time, from_pitch, time_span, pitch_span)
+            after = len(clip.get_notes(0, 0, clip.length, 128))
+
+            return {
+                "track_index": track_index,
+                "clip_index": clip_index,
+                "notes_before": before,
+                "notes_after": after,
+                "removed": before - after
+            }
+        except Exception as e:
+            self.log_message("Error removing notes: " + str(e))
+            raise
+
+    def _set_clip_envelope(self, track_index, clip_index, device_index, parameter_index, points,
+                           mixer_parameter=None):
         """Set automation envelope points for a parameter in a clip.
         points: list of {"time": float, "value": float} (value is normalized 0-1)"""
         try:
@@ -1659,8 +1740,7 @@ class AbletonMCP(ControlSurface):
                 raise Exception("No clip in slot")
             clip = clip_slot.clip
 
-            device = track.devices[device_index]
-            param = device.parameters[parameter_index]
+            param = self._resolve_automatable(track, device_index, parameter_index, mixer_parameter)
 
             # Try to get existing envelope, or create one
             envelope = clip.automation_envelope(param)
@@ -1673,6 +1753,14 @@ class AbletonMCP(ControlSurface):
             # Sort points by time and interpolate smooth ramps between them
             sorted_points = sorted(points, key=lambda p: float(p.get("time", 0)))
             step_size = 0.25  # beats per interpolation step
+            # A step inserted exactly at t0 does not cover t0 itself, so the very start
+            # of the clip kept the parameter's old value. Lay one step down before it.
+            if sorted_points:
+                first = sorted_points[0]
+                t_first = float(first.get("time", 0))
+                v_first = float(first.get("value", 0))
+                envelope.insert_step(t_first - step_size, step_size,
+                                     param.min + v_first * (param.max - param.min))
             for i in range(len(sorted_points) - 1):
                 t0 = float(sorted_points[i].get("time", 0))
                 v0 = float(sorted_points[i].get("value", 0))
@@ -1706,7 +1794,8 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error setting clip envelope: " + str(e))
             raise
 
-    def _get_clip_envelope(self, track_index, clip_index, device_index, parameter_index):
+    def _get_clip_envelope(self, track_index, clip_index, device_index, parameter_index,
+                                  mixer_parameter=None):
         """Read automation envelope data for a parameter in a clip."""
         try:
             track = self._song.tracks[track_index]
@@ -1715,8 +1804,7 @@ class AbletonMCP(ControlSurface):
                 raise Exception("No clip in slot")
             clip = clip_slot.clip
 
-            device = track.devices[device_index]
-            param = device.parameters[parameter_index]
+            param = self._resolve_automatable(track, device_index, parameter_index, mixer_parameter)
 
             envelope = clip.automation_envelope(param)
             if envelope is None:
@@ -1752,7 +1840,8 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error getting clip envelope: " + str(e))
             raise
 
-    def _clear_clip_envelope(self, track_index, clip_index, device_index, parameter_index):
+    def _clear_clip_envelope(self, track_index, clip_index, device_index, parameter_index,
+                                    mixer_parameter=None):
         """Clear automation envelope for a parameter in a clip"""
         try:
             track = self._song.tracks[track_index]
@@ -1761,8 +1850,7 @@ class AbletonMCP(ControlSurface):
                 raise Exception("No clip in slot")
             clip = clip_slot.clip
 
-            device = track.devices[device_index]
-            param = device.parameters[parameter_index]
+            param = self._resolve_automatable(track, device_index, parameter_index, mixer_parameter)
 
             clip.clear_envelope(param)
 
