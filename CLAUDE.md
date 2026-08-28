@@ -10,7 +10,7 @@ Control Ableton Live through MCP tools. This project has two parts:
 - **Track indexing**: 0+ for regular tracks, `-1` for master, `-2`/`-3` for return A/B
 - **Parameter values**: Always normalized 0.0–1.0, regardless of actual range
 - **Clip positions**: In beats (4.0 = 1 bar at 4/4)
-- **MIDI notes**: pitch 0–127 (C3=48, C4=60), velocity 0–127
+- **MIDI notes**: pitch 0–127, velocity 0–127. Live names middle C (pitch 60) **C3**, so C1=36, C2=48, C4=72 — match Live's own display, not the C4=60 convention
 - **Arrangement is read-only** — can only populate via `record_arrangement` from session clips
 
 ## Music Production Skills
