@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Optional, Union
 
+try:
+    from MCP_Server import notation
+except ImportError:  # launched as `python MCP_Server/server.py`
+    import notation
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -428,7 +433,8 @@ def create_audio_clip(ctx: Context, track_index: int, clip_index: int, file_path
         return f"Error creating audio clip: {str(e)}"
 
 @mcp.tool()
-def get_arrangement_clip_notes(ctx: Context, track_index: int, arrangement_clip_index: int) -> str:
+def get_arrangement_clip_notes(ctx: Context, track_index: int, arrangement_clip_index: int,
+                               format: str = "json") -> str:
     """
     Read MIDI notes from a clip in the arrangement view (not session view).
 
@@ -436,6 +442,8 @@ def get_arrangement_clip_notes(ctx: Context, track_index: int, arrangement_clip_
     - track_index: Index of the track
     - arrangement_clip_index: Index into track.arrangement_clips (0 = first arrangement clip on the track).
                               Get the index from `get_arrangement_clips`.
+    - format: "json" (default) or "csv" — CSV is a `# clip ...` comment line then
+              `pitch,start,dur,vel,mute` rows, a fraction of the tokens for dense clips
     """
     try:
         ableton = get_ableton_connection()
@@ -443,7 +451,7 @@ def get_arrangement_clip_notes(ctx: Context, track_index: int, arrangement_clip_
             "track_index": track_index,
             "arrangement_clip_index": arrangement_clip_index,
         })
-        return json.dumps(result, indent=2)
+        return notation.render_clip(result, format)
     except Exception as e:
         logger.error(f"Error getting arrangement clip notes: {str(e)}")
         return f"Error getting arrangement clip notes: {str(e)}"
@@ -548,20 +556,25 @@ def create_arrangement_audio_clip(
 
 @mcp.tool()
 def add_notes_to_clip(
-    ctx: Context, 
-    track_index: int, 
-    clip_index: int, 
-    notes: List[Dict[str, Union[int, float, bool]]]
+    ctx: Context,
+    track_index: int,
+    clip_index: int,
+    notes: Union[List[Dict[str, Union[int, float, bool]]], str]
 ) -> str:
     """
     Add MIDI notes to a clip.
-    
+
     Parameters:
     - track_index: The index of the track containing the clip
     - clip_index: The index of the clip slot containing the clip
-    - notes: List of note dictionaries, each with pitch, start_time, duration, velocity, and mute
+    - notes: Either a list of note dicts (pitch, start_time required; duration,
+             velocity, mute optional), or the same notes as CSV text:
+             `pitch,start,dur,vel[,mute]` one note per line, header optional.
+             Invalid notes are rejected before anything is written.
     """
     try:
+        if isinstance(notes, str):
+            notes = notation.csv_to_notes(notes)
         ableton = get_ableton_connection()
         result = ableton.send_command("add_notes_to_clip", {
             "track_index": track_index,
@@ -1490,13 +1503,15 @@ def set_clip_loop(ctx: Context, track_index: int, clip_index: int, loop_start: f
         return f"Error setting clip loop: {str(e)}"
 
 @mcp.tool()
-def get_clip_notes(ctx: Context, track_index: int, clip_index: int) -> str:
+def get_clip_notes(ctx: Context, track_index: int, clip_index: int, format: str = "json") -> str:
     """
     Get all MIDI notes from a clip.
 
     Parameters:
     - track_index: The index of the track
     - clip_index: The index of the clip slot
+    - format: "json" (default) or "csv" — CSV is a `# clip ...` comment line then
+              `pitch,start,dur,vel,mute` rows, a fraction of the tokens for dense clips
     """
     try:
         ableton = get_ableton_connection()
@@ -1504,7 +1519,7 @@ def get_clip_notes(ctx: Context, track_index: int, clip_index: int) -> str:
             "track_index": track_index,
             "clip_index": clip_index
         })
-        return json.dumps(result, indent=2)
+        return notation.render_clip(result, format)
     except Exception as e:
         logger.error(f"Error getting clip notes: {str(e)}")
         return f"Error getting clip notes: {str(e)}"
