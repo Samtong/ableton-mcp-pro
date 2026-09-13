@@ -317,6 +317,23 @@ def get_track_info(ctx: Context, track_index: int) -> str:
         return f"Error getting track info: {str(e)}"
 
 @mcp.tool()
+def get_selected_context(ctx: Context) -> str:
+    """
+    What the user currently has selected in Live: track, scene, highlighted clip
+    slot, the clip open in the detail view (session or arrangement), selected
+    device, and the playhead. Call this when the user says "this track", "this
+    clip", "here" instead of asking them for indices. Parts with nothing
+    selected are null.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_selected_context")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting selected context: {str(e)}")
+        return f"Error getting selected context: {str(e)}"
+
+@mcp.tool()
 def get_track_output_meter(
     ctx: Context,
     track_index: int,

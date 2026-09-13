@@ -295,6 +295,8 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._get_full_arrangement()
             elif command_type == "get_locators":
                 response["result"] = self._get_locators()
+            elif command_type == "get_selected_context":
+                response["result"] = self._get_selected_context()
             elif command_type == "get_clip_notes":
                 track_index = params.get("track_index", 0)
                 clip_index = params.get("clip_index", 0)
@@ -893,6 +895,87 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error setting track color: " + str(e))
             raise
+
+    @staticmethod
+    def _index_in(items, obj):
+        """Position of a Live object in a Live list, by equality (wrappers are not identical)."""
+        for i, item in enumerate(items):
+            if item == obj:
+                return i
+        return None
+
+    def _track_index_of(self, track):
+        """Project convention: 0+ tracks, -1 master, -2 - i for return track i."""
+        index = self._index_in(self._song.tracks, track)
+        if index is not None:
+            return index
+        index = self._index_in(self._song.return_tracks, track)
+        if index is not None:
+            return -2 - index
+        if track == self._song.master_track:
+            return -1
+        return None
+
+    def _describe_clip_slot(self, slot):
+        track = slot.canonical_parent
+        return {
+            "track_index": self._track_index_of(track),
+            "clip_index": self._index_in(track.clip_slots, slot),
+            "has_clip": slot.has_clip,
+            "clip_name": slot.clip.name if slot.has_clip else None,
+        }
+
+    def _describe_clip(self, clip):
+        info = {"name": clip.name}
+        try:
+            parent = clip.canonical_parent
+            if self._safe(clip, "is_arrangement_clip", False):
+                info.update({
+                    "view": "arrangement",
+                    "track_index": self._track_index_of(parent),
+                    "arrangement_clip_index": self._index_in(parent.arrangement_clips, clip),
+                    "start_time": clip.start_time,
+                })
+            else:
+                slot = self._describe_clip_slot(parent)
+                info.update({"view": "session", "track_index": slot["track_index"],
+                             "clip_index": slot["clip_index"]})
+        except Exception as e:
+            self.log_message("Could not locate detail clip: " + str(e))
+        return info
+
+    def _get_selected_context(self):
+        """What the user has selected in Live. Each part is None when Live has
+        nothing selected there or cannot resolve it, never an error."""
+        view = self._song.view
+        context = {
+            "selected_track": None,
+            "selected_scene": None,
+            "highlighted_clip_slot": None,
+            "detail_clip": None,
+            "selected_device": None,
+            "current_song_time": self._safe(self._song, "current_song_time"),
+            "is_playing": self._safe(self._song, "is_playing"),
+        }
+        track = self._safe(view, "selected_track")
+        if track is not None:
+            context["selected_track"] = {"index": self._track_index_of(track), "name": track.name}
+            device = self._safe(self._safe(track, "view"), "selected_device")
+            if device is not None:
+                context["selected_device"] = {"index": self._index_in(track.devices, device), "name": device.name}
+        scene = self._safe(view, "selected_scene")
+        if scene is not None:
+            context["selected_scene"] = {"index": self._index_in(self._song.scenes, scene), "name": scene.name}
+        slot = self._safe(view, "highlighted_clip_slot")
+        if slot is not None:
+            try:
+                context["highlighted_clip_slot"] = self._describe_clip_slot(slot)
+            except Exception as e:
+                self.log_message("Could not locate highlighted clip slot: " + str(e))
+        clip = self._safe(view, "detail_clip")
+        if clip is not None:
+            context["detail_clip"] = self._describe_clip(clip)
+        return context
 
     def _get_track(self, track_index):
         """Get a track by index. Use -1 for master track, -2/-3/etc for return tracks."""

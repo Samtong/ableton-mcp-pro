@@ -146,5 +146,71 @@ class ColorTest(unittest.TestCase):
         self.assertEqual(full["tracks_with_clips"][0]["clips"][0]["color"], 0x00FF00)
 
 
+class SelectedContextTest(unittest.TestCase):
+    def setUp(self):
+        self.clip = Obj(name="Bass A", is_arrangement_clip=False)
+        self.empty_slot = Obj(has_clip=False, clip=None)
+        self.slot = Obj(has_clip=True, clip=self.clip)
+        self.device = Obj(name="Operator")
+        self.track = Obj(name="BASS", clip_slots=[self.empty_slot, self.slot],
+                                           devices=[Obj(name="EQ"), self.device],
+                                           arrangement_clips=[],
+                                           view=Obj(selected_device=self.device))
+        self.slot.canonical_parent = self.track
+        self.empty_slot.canonical_parent = self.track
+        self.clip.canonical_parent = self.slot
+        self.other = Obj(name="KICK", clip_slots=[], devices=[], arrangement_clips=[],
+                                           view=Obj(selected_device=None))
+        self.ret = Obj(name="A-Reverb", devices=[], view=Obj(selected_device=None))
+        self.scene = Obj(name="Drop")
+        self.view = Obj(selected_track=self.track, selected_scene=self.scene,
+                                          highlighted_clip_slot=self.slot, detail_clip=self.clip)
+        self.song = Obj(tracks=[self.other, self.track], return_tracks=[self.ret],
+                                          master_track=Obj(name="Main"),
+                                          scenes=[Obj(name="Intro"), self.scene],
+                                          view=self.view, current_song_time=32.0, is_playing=False)
+        self.script = make_script(self.song)
+
+    def test_full_context(self):
+        self.assertEqual(self.script._get_selected_context(), {
+            "selected_track": {"index": 1, "name": "BASS"},
+            "selected_scene": {"index": 1, "name": "Drop"},
+            "highlighted_clip_slot": {"track_index": 1, "clip_index": 1, "has_clip": True, "clip_name": "Bass A"},
+            "detail_clip": {"name": "Bass A", "view": "session", "track_index": 1, "clip_index": 1},
+            "selected_device": {"index": 1, "name": "Operator"},
+            "current_song_time": 32.0,
+            "is_playing": False,
+        })
+
+    def test_return_and_master_indices(self):
+        self.view.selected_track = self.ret
+        self.assertEqual(self.script._get_selected_context()["selected_track"], {"index": -2, "name": "A-Reverb"})
+        self.view.selected_track = self.song.master_track
+        self.assertEqual(self.script._get_selected_context()["selected_track"]["index"], -1)
+
+    def test_arrangement_detail_clip(self):
+        arr_clip = Obj(name="Lead", is_arrangement_clip=True, start_time=64.0,
+                                         canonical_parent=self.track)
+        self.track.arrangement_clips = [Obj(name="x"), arr_clip]
+        self.view.detail_clip = arr_clip
+        self.assertEqual(self.script._get_selected_context()["detail_clip"], {
+            "name": "Lead", "view": "arrangement", "track_index": 1, "arrangement_clip_index": 1,
+            "start_time": 64.0})
+
+    def test_nothing_selected_is_nulls_not_errors(self):
+        self.view.selected_track = None
+        self.view.selected_scene = None
+        self.view.highlighted_clip_slot = None
+        self.view.detail_clip = None
+        context = self.script._get_selected_context()
+        for section in ("selected_track", "selected_scene", "highlighted_clip_slot", "detail_clip",
+                        "selected_device"):
+            self.assertIsNone(context[section], section)
+
+    def test_unlocatable_objects_degrade_to_partial_info(self):
+        del self.clip.canonical_parent
+        self.assertEqual(self.script._get_selected_context()["detail_clip"], {"name": "Bass A"})
+
+
 if __name__ == "__main__":
     unittest.main()
