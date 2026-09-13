@@ -6,6 +6,7 @@ in both directions: reading a clip and writing one.
 import json
 
 HEADER = "pitch,start,dur,vel,mute"
+FORMATS = ("json", "csv")
 
 
 def _num(value):
@@ -70,4 +71,4 @@ def render_clip(clip, fmt):
         return json.dumps(clip, indent=2)
     if fmt == "csv":
         return clip_to_csv(clip)
-    raise ValueError("format must be 'json' or 'csv', got {!r}".format(fmt))
+    raise ValueError("format must be one of {}, got {!r}".format(", ".join(FORMATS), fmt))

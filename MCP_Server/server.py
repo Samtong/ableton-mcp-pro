@@ -215,6 +215,11 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
         logger.info("AbletonMCP server shut down")
 
 # Create the MCP server with lifespan support
+def _check_note_format(format: str) -> None:
+    """Reject an unknown note format before a round trip to Ableton."""
+    if format not in notation.FORMATS:
+        raise ValueError(f"format must be one of {', '.join(notation.FORMATS)}, got {format!r}")
+
 mcp = FastMCP(
     "AbletonMCP",
     # description="Ableton Live integration through the Model Context Protocol",
@@ -319,11 +324,10 @@ def get_track_info(ctx: Context, track_index: int) -> str:
 @mcp.tool()
 def get_selected_context(ctx: Context) -> str:
     """
-    What the user currently has selected in Live: track, scene, highlighted clip
-    slot, the clip open in the detail view (session or arrangement), selected
-    device, and the playhead. Call this when the user says "this track", "this
-    clip", "here" instead of asking them for indices. Parts with nothing
-    selected are null.
+    What the user has selected in Live right now: track, scene, highlighted clip slot, the
+    clip open in the detail view (session or arrangement), selected device, and the playhead.
+    Use it when the user says "this track", "this clip" or "here" instead of asking for
+    indices. Anything with nothing selected is null.
     """
     try:
         ableton = get_ableton_connection()
@@ -460,10 +464,11 @@ def get_arrangement_clip_notes(ctx: Context, track_index: int, arrangement_clip_
     - track_index: Index of the track
     - arrangement_clip_index: Index into track.arrangement_clips (0 = first arrangement clip on the track).
                               Get the index from `get_arrangement_clips`.
-    - format: "json" (default) or "csv" — CSV is a `# clip ...` comment line then
-              `pitch,start,dur,vel,mute` rows, a fraction of the tokens for dense clips
+    - format: "json" (default) or "csv" — a `# clip ...` line then `pitch,start,dur,vel,mute`
+              rows, far fewer tokens for a dense clip
     """
     try:
+        _check_note_format(format)
         ableton = get_ableton_connection()
         result = ableton.send_command("get_arrangement_clip_notes", {
             "track_index": track_index,
@@ -585,16 +590,15 @@ def add_notes_to_clip(
     Parameters:
     - track_index: The index of the track containing the clip
     - clip_index: The index of the clip slot containing the clip
-    - notes: Either a list of note dicts (pitch, start_time required; duration,
-             velocity, mute optional), or the same notes as CSV text:
-             `pitch,start,dur,vel[,mute]` one note per line, header optional.
-             Invalid notes are rejected before anything is written.
+    - notes: A list of note dicts (pitch and start_time required; duration, velocity, mute
+             optional), or the same notes as CSV text — `pitch,start,dur,vel[,mute]`, one note
+             per line, header optional. Invalid notes are rejected before anything is written.
     """
     try:
         if isinstance(notes, str):
             notes = notation.csv_to_notes(notes)
         ableton = get_ableton_connection()
-        result = ableton.send_command("add_notes_to_clip", {
+        ableton.send_command("add_notes_to_clip", {
             "track_index": track_index,
             "clip_index": clip_index,
             "notes": notes
@@ -631,21 +635,21 @@ def set_clip_color(ctx: Context, track_index: int, clip_index: int, color: Optio
                    color_index: Optional[int] = None, key: Optional[str] = None) -> str:
     """
     Color a session clip. Pass exactly one of:
-    - color: "#RRGGBB" — Live snaps it to the nearest entry in its 70-color palette
+    - color: "#RRGGBB" — Live snaps it to the nearest of its 70 palette colors
     - color_index: 0-69, Live's palette index
     - key: a musical key — "F minor", "F#m", "Bb" (major), "Ebmaj" — or a Camelot code like "8A".
-      Colors by Camelot number: relative major/minor share a color, and keys a fifth
-      apart get neighbouring hues, so harmonically compatible clips look alike.
+      Colors by Camelot number: relative major/minor share a color and keys a fifth apart get
+      neighbouring hues, so harmonically compatible clips look alike.
 
-    Returns the color Live actually applied (plus the Camelot code for a key).
+    Returns the color Live actually applied, plus the Camelot code when a key was given.
     """
     try:
-        color_params, code = camelot.resolve_color(color, color_index, key)
+        color_params, camelot_code = camelot.resolve_color(color, color_index, key)
         ableton = get_ableton_connection()
         result = ableton.send_command("set_clip_color", dict(
             {"track_index": track_index, "clip_index": clip_index}, **color_params))
-        if code:
-            result["camelot"] = code
+        if camelot_code:
+            result["camelot"] = camelot_code
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.error(f"Error setting clip color: {str(e)}")
@@ -692,9 +696,9 @@ def set_song_scale(ctx: Context, root_note: Optional[Union[str, int]] = None, sc
                    scale_mode: Optional[bool] = None) -> str:
     """
     Set the song's key (Live 12+). Pass any combination of:
-    - root_note: note name ("F#", "Gb") or 0-11 (0 = C)
-    - scale_name: as Live names it, e.g. "Major", "Minor", "Dorian"
-    - scale_mode: true to turn on Scale Mode (highlights and folds to the scale in clips)
+    - root_note: a note name ("F#", "Gb") or 0-11, where 0 is C
+    - scale_name: as Live names it — "Major", "Minor", "Dorian", ...
+    - scale_mode: true turns on Scale Mode (scale highlighting and fold in clips)
 
     Returns the scale Live reports back. The current scale is also in get_session_info.
     """
@@ -1600,10 +1604,11 @@ def get_clip_notes(ctx: Context, track_index: int, clip_index: int, format: str 
     Parameters:
     - track_index: The index of the track
     - clip_index: The index of the clip slot
-    - format: "json" (default) or "csv" — CSV is a `# clip ...` comment line then
-              `pitch,start,dur,vel,mute` rows, a fraction of the tokens for dense clips
+    - format: "json" (default) or "csv" — a `# clip ...` line then `pitch,start,dur,vel,mute`
+              rows, far fewer tokens for a dense clip
     """
     try:
+        _check_note_format(format)
         ableton = get_ableton_connection()
         result = ableton.send_command("get_clip_notes", {
             "track_index": track_index,
