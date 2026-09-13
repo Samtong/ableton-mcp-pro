@@ -4,6 +4,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from _Framework.ControlSurface import ControlSurface
 import socket
 import json
+import math
 import threading
 import time
 import traceback
@@ -17,6 +18,53 @@ except ImportError:
 # Constants for socket communication
 DEFAULT_PORT = 9877
 HOST = "localhost"
+
+
+def _is_number(value):
+    """A finite int/float. bool is excluded: True would otherwise pass as pitch 1."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def validate_notes(notes):
+    """Check note dicts and convert them to the tuples Clip.set_notes expects.
+
+    Raises ValueError naming the offending notes, so nothing half-written ever
+    reaches a clip. pitch and start_time are required: silently landing a
+    note with no pitch on C3 hides the caller's bug.
+    """
+    live_notes = []
+    problems = []
+    for i, note in enumerate(notes):
+        if not isinstance(note, dict):
+            problems.append("note {0}: expected an object, got {1!r}".format(i, note))
+            continue
+        pitch = note.get("pitch")
+        start_time = note.get("start_time")
+        duration = note.get("duration", 0.25)
+        velocity = note.get("velocity", 100)
+        mute = note.get("mute", False)
+        reasons = []
+        if not _is_number(pitch) or pitch != int(pitch) or not 0 <= pitch <= 127:
+            reasons.append("pitch must be an integer 0-127, got {0!r}".format(pitch))
+        if not _is_number(start_time) or start_time < 0:
+            reasons.append("start_time must be a number >= 0, got {0!r}".format(start_time))
+        if not _is_number(duration) or duration <= 0:
+            reasons.append("duration must be a number > 0, got {0!r}".format(duration))
+        if not _is_number(velocity) or not 0 <= velocity <= 127:
+            reasons.append("velocity must be a number 0-127, got {0!r}".format(velocity))
+        if not isinstance(mute, bool):
+            reasons.append("mute must be true or false, got {0!r}".format(mute))
+        if reasons:
+            problems.append("note {0}: {1}".format(i, ", ".join(reasons)))
+        else:
+            live_notes.append((int(pitch), float(start_time), float(duration), velocity, mute))
+    if problems:
+        shown = problems[:5]
+        if len(problems) > 5:
+            shown.append("and {0} more".format(len(problems) - 5))
+        raise ValueError("Invalid notes: " + "; ".join(shown))
+    return live_notes
 
 def create_instance(c_instance):
     """Create and return the AbletonMCP script instance"""
@@ -2049,6 +2097,7 @@ class AbletonMCP(ControlSurface):
         notes: optional list of note dicts to seed the clip with.
         """
         try:
+            live_notes = validate_notes(notes) if notes else []
             if track_index < 0 or track_index >= len(self._song.tracks):
                 raise IndexError("Track index out of range")
 
@@ -2067,15 +2116,7 @@ class AbletonMCP(ControlSurface):
             clip = track.create_midi_clip(start, length_val)
 
             note_count = 0
-            if notes and clip is not None:
-                live_notes = []
-                for n in notes:
-                    pitch = n.get("pitch", 60)
-                    start_time = n.get("start_time", 0.0)
-                    duration = n.get("duration", 0.25)
-                    velocity = n.get("velocity", 100)
-                    mute = n.get("mute", False)
-                    live_notes.append((pitch, start_time, duration, velocity, mute))
+            if live_notes and clip is not None:
                 clip.set_notes(tuple(live_notes))
                 note_count = len(live_notes)
 
@@ -2178,6 +2219,7 @@ class AbletonMCP(ControlSurface):
     def _add_notes_to_clip(self, track_index, clip_index, notes):
         """Add MIDI notes to a clip"""
         try:
+            live_notes = validate_notes(notes)
             if track_index < 0 or track_index >= len(self._song.tracks):
                 raise IndexError("Track index out of range")
             
@@ -2192,18 +2234,7 @@ class AbletonMCP(ControlSurface):
                 raise Exception("No clip in slot")
             
             clip = clip_slot.clip
-            
-            # Convert note data to Live's format
-            live_notes = []
-            for note in notes:
-                pitch = note.get("pitch", 60)
-                start_time = note.get("start_time", 0.0)
-                duration = note.get("duration", 0.25)
-                velocity = note.get("velocity", 100)
-                mute = note.get("mute", False)
-                
-                live_notes.append((pitch, start_time, duration, velocity, mute))
-            
+
             # Add the notes
             clip.set_notes(tuple(live_notes))
             
