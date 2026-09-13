@@ -125,7 +125,20 @@ def your_new_command(ctx: Context, param1: int, param2: str) -> str:
         return f"Error: {str(e)}"
 ```
 
-If it's a modifying command, add it to the `is_modifying_command` list in the server as well.
+#### 3. Register a state-modifying command in all three places
+
+1. The Remote Script's main-thread command list (`elif command_type in [...]`)
+2. Its `main_thread_task` routing
+3. The server's `is_modifying_command` list in `AbletonConnection.send_command` (longer timeout, settle delays)
+
+### Tests
+
+Pure logic (`MCP_Server/notation.py`, `MCP_Server/camelot.py`, `validate_notes`) and
+Remote Script handlers are unit-tested with fake Live objects — `tests/remote_script_harness.py`
+loads `__init__.py` with `_Framework` stubbed. Run from the repo root with a Python
+that has `mcp` installed:
+
+    .venv/bin/python -m unittest discover -s tests -v
 
 ## Mixing — Track Volume & Panning
 
