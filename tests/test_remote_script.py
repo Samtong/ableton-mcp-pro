@@ -13,6 +13,13 @@ class ValidateNotesTest(unittest.TestCase):
             [(60, 0.0, 0.25, 100, False), (62, 1.5, 1.0, 80, True)],
         )
 
+    def test_integral_float_velocity_becomes_int(self):
+        # CSV input yields floats; Live's legacy set_notes tuple wants an int velocity.
+        [note] = rs.validate_notes([{"pitch": 60, "start_time": 0, "velocity": 100.0}])
+        self.assertIs(type(note[3]), int)
+        [note] = rs.validate_notes([{"pitch": 60, "start_time": 0, "velocity": 72.5}])
+        self.assertEqual(note[3], 72.5)
+
     def test_missing_pitch_and_start_are_errors(self):
         with self.assertRaises(ValueError) as caught:
             rs.validate_notes([{"duration": 1}])

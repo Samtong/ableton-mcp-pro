@@ -58,6 +58,7 @@ def validate_notes(notes):
         if reasons:
             problems.append("note {0}: {1}".format(i, ", ".join(reasons)))
         else:
+            velocity = int(velocity) if velocity == int(velocity) else float(velocity)
             live_notes.append((int(pitch), float(start_time), float(duration), velocity, mute))
     if problems:
         shown = problems[:5]
