@@ -22,6 +22,9 @@ class NotesToCsvTest(unittest.TestCase):
     def test_empty(self):
         self.assertEqual(notes_to_csv([]), "pitch,start,dur,vel,mute")
 
+    def test_negative_zero_prints_as_zero(self):
+        self.assertEqual(notes_to_csv([dict(NOTES[0], start_time=-0.0)]).split("\n")[1], "64,0,0.5,90,0")
+
 
 class CsvToNotesTest(unittest.TestCase):
     def test_round_trip(self):
@@ -35,6 +38,14 @@ class CsvToNotesTest(unittest.TestCase):
             {"pitch": 60, "start_time": 0.0, "duration": 0.5, "velocity": 100.0, "mute": False},
             {"pitch": 62, "start_time": 0.5, "duration": 0.5, "velocity": 80.0, "mute": True},
         ])
+
+    def test_mute_accepts_true(self):
+        self.assertTrue(csv_to_notes("60,0,0.5,100,true")[0]["mute"])
+        self.assertTrue(csv_to_notes("60,0,0.5,100,TRUE")[0]["mute"])
+
+    def test_too_many_columns_is_an_error(self):
+        with self.assertRaisesRegex(ValueError, "Line 1"):
+            csv_to_notes("60,0,0.5,100,0,extra")
 
     def test_wrong_column_count_names_the_line(self):
         with self.assertRaisesRegex(ValueError, "Line 2"):

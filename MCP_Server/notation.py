@@ -11,7 +11,7 @@ HEADER = "pitch,start,dur,vel,mute"
 def _num(value):
     """Shortest faithful text for a beat/velocity value: 1.0 -> '1', 0.250 -> '0.25'."""
     text = "{:.4f}".format(float(value)).rstrip("0").rstrip(".")
-    return "0" if text in ("", "-0") else text
+    return "0" if text == "-0" else text
 
 
 def notes_to_csv(notes):

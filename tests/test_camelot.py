@@ -58,6 +58,15 @@ class ColorForKeyTest(unittest.TestCase):
         for color in colors:
             self.assertTrue(0 <= color <= 0xFFFFFF)
 
+    def test_hues_are_30_degrees_apart_at_one_brightness(self):
+        import colorsys
+        for n in range(1, 13):
+            rgb = color_for_key("{0}B".format(n))
+            h, s, v = colorsys.rgb_to_hsv(rgb >> 16 & 255, rgb >> 8 & 255, rgb & 255)
+            self.assertAlmostEqual(h, (n - 1) / 12.0, delta=0.01)
+            self.assertAlmostEqual(s, 0.75, delta=0.01)
+            self.assertAlmostEqual(v, 0.95 * 255, delta=1.5)
+
 
 class ResolveColorTest(unittest.TestCase):
     def test_each_form(self):
@@ -75,6 +84,8 @@ class ResolveColorTest(unittest.TestCase):
         for kwargs in ({"color": "orange"}, {"color_index": 70}, {"color_index": True}):
             with self.assertRaises(ValueError):
                 resolve_color(**kwargs)
+        self.assertEqual(resolve_color(color_index=0), ({"color_index": 0}, None))
+        self.assertEqual(resolve_color(color_index=69), ({"color_index": 69}, None))
         self.assertEqual(parse_hex_color("00ff00"), 0x00FF00)
 
 

@@ -20,6 +20,13 @@ class ValidateNotesTest(unittest.TestCase):
         [note] = rs.validate_notes([{"pitch": 60, "start_time": 0, "velocity": 72.5}])
         self.assertEqual(note[3], 72.5)
 
+    def test_boundaries_are_accepted(self):
+        notes = rs.validate_notes([
+            {"pitch": 0, "start_time": 0, "velocity": 0},
+            {"pitch": 127, "start_time": 0, "velocity": 127},
+        ])
+        self.assertEqual([(n[0], n[3]) for n in notes], [(0, 0), (127, 127)])
+
     def test_missing_pitch_and_start_are_errors(self):
         with self.assertRaises(ValueError) as caught:
             rs.validate_notes([{"duration": 1}])
@@ -55,6 +62,10 @@ class ValidateNotesTest(unittest.TestCase):
         self.assertIn("note 4:", message)
         self.assertNotIn("note 5:", message)
         self.assertIn("and 3 more", message)
+
+    def test_six_problems_show_five_and_one_more(self):
+        with self.assertRaisesRegex(ValueError, "and 1 more$"):
+            rs.validate_notes([{"pitch": -1, "start_time": 0}] * 6)
 
 
 class FakeClip(object):
@@ -129,6 +140,12 @@ class ColorTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self.script._set_clip_color(0, 0, **kwargs)
 
+    def test_palette_and_rgb_bounds_are_accepted(self):
+        for kwargs, field, value in (({"color_index": 0}, "color_index", 0), ({"color_index": 69}, "color_index", 69),
+                                     ({"rgb": 0}, "color", 0), ({"rgb": 0xFFFFFF}, "color", 0xFFFFFF)):
+            self.script._set_clip_color(0, 0, **kwargs)
+            self.assertEqual(getattr(self.clip, field), value, kwargs)
+
     def test_set_track_color_supports_master(self):
         self.assertEqual(self.script._set_track_color(-1, color_index=3)["color_index"], 3)
         self.assertEqual(self.master.color_index, 3)
@@ -181,6 +198,11 @@ class SelectedContextTest(unittest.TestCase):
             "current_song_time": 32.0,
             "is_playing": False,
         })
+
+    def test_highlighted_empty_slot(self):
+        self.view.highlighted_clip_slot = self.empty_slot
+        self.assertEqual(self.script._get_selected_context()["highlighted_clip_slot"],
+                         {"track_index": 1, "clip_index": 0, "has_clip": False, "clip_name": None})
 
     def test_return_and_master_indices(self):
         self.view.selected_track = self.ret
@@ -237,6 +259,12 @@ class ScaleTest(unittest.TestCase):
         self.assertEqual((song.root_note, song.scale_name, song.scale_mode), (9, "Dorian", False))
         self.assertEqual(result, {"root_note": 9, "root_note_name": "A", "scale_name": "Dorian",
                                   "scale_mode": False})
+
+    def test_top_root_note_and_turning_scale_mode_off(self):
+        song = live12_song(root_note=0, scale_name="Major", scale_mode=True)
+        result = make_script(song)._set_song_scale(root_note=11, scale_mode=False)
+        self.assertEqual((song.root_note, song.scale_mode), (11, False))
+        self.assertEqual(result["root_note_name"], "B")
 
     def test_set_song_scale_rejects_bad_root_and_old_live(self):
         with self.assertRaises(ValueError):
