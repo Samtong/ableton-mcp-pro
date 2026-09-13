@@ -133,9 +133,15 @@ def your_new_command(ctx: Context, param1: int, param2: str) -> str:
 
 ### Tests
 
-Pure logic (`MCP_Server/notation.py`, `MCP_Server/camelot.py`, `validate_notes`) and
-Remote Script handlers are unit-tested with fake Live objects — `tests/remote_script_harness.py`
-loads `__init__.py` with `_Framework` stubbed. Run from the repo root with a Python
+- `tests/test_notation.py`, `tests/test_camelot.py` — pure logic
+- `tests/test_remote_script.py` — Remote Script handlers and `_process_command` routing
+  against fake Live objects; `tests/remote_script_harness.py` loads `__init__.py` with
+  `_Framework` stubbed and runs `schedule_message` tasks inline
+- `tests/test_server_tools.py` — MCP tool wrappers against a fake connection, and the
+  `is_modifying_command` timeouts against a fake socket
+
+Route new commands through `_process_command` in tests, not just the handler: a command
+missing from the dispatch lists otherwise passes. Run from the repo root with a Python
 that has `mcp` installed:
 
     .venv/bin/python -m unittest discover -s tests -v
