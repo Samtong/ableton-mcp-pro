@@ -39,8 +39,13 @@ def load_remote_script():
 
 
 def make_script(song):
-    """An AbletonMCP instance with only `_song` set: no socket server, no Live."""
+    """An AbletonMCP instance around a fake song: no socket server, no Live."""
     module = load_remote_script()
     script = object.__new__(module.AbletonMCP)
     script._song = song
+    script.song = lambda: song
+    # Live runs scheduled tasks on its main thread later; running them inline keeps
+    # _process_command's queue hand-off synchronous. Delays are recorded for tests.
+    script.scheduled_delays = []
+    script.schedule_message = lambda delay, task: (script.scheduled_delays.append(delay), task())
     return script

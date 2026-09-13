@@ -284,5 +284,50 @@ class ScaleTest(unittest.TestCase):
         self.assertEqual((result["root_note_name"], result["scale_name"]), ("D", "Minor"))
 
 
+class DispatchTest(unittest.TestCase):
+    """Commands reach their handlers through _process_command, mutations via the main thread."""
+
+    def setUp(self):
+        self.clip = Obj(name="Bass", color=0, color_index=0)
+        self.track = Obj(name="BASS", clip_slots=[Obj(has_clip=True, clip=self.clip)], color=0, color_index=0)
+        view = Obj(selected_track=None, selected_scene=None, highlighted_clip_slot=None, detail_clip=None)
+        self.song = live12_song(tracks=[self.track], root_note=0, scale_name="Major", scale_mode=False,
+                                view=view, current_song_time=8.0, is_playing=True)
+        self.script = make_script(self.song)
+
+    def send(self, command_type, **params):
+        return self.script._process_command({"type": command_type, "params": params})
+
+    def test_set_clip_color_runs_on_the_main_thread(self):
+        response = self.send("set_clip_color", track_index=0, clip_index=0, color_index=7)
+        self.assertEqual(response["status"], "success", response)
+        self.assertEqual(response["result"]["color_index"], 7)
+        self.assertEqual(self.script.scheduled_delays, [0])
+
+    def test_set_track_color_runs_on_the_main_thread(self):
+        response = self.send("set_track_color", track_index=0, rgb=0x123456)
+        self.assertEqual(response["status"], "success", response)
+        self.assertEqual(self.track.color, 0x123456)
+        self.assertEqual(self.script.scheduled_delays, [0])
+
+    def test_set_song_scale_runs_on_the_main_thread(self):
+        response = self.send("set_song_scale", root_note=9, scale_name="Dorian", scale_mode=True)
+        self.assertEqual(response["status"], "success", response)
+        self.assertEqual(response["result"], {"root_note": 9, "root_note_name": "A", "scale_name": "Dorian",
+                                              "scale_mode": True})
+        self.assertEqual(self.script.scheduled_delays, [0])
+
+    def test_get_selected_context_is_read_without_scheduling(self):
+        response = self.send("get_selected_context")
+        self.assertEqual(response["status"], "success", response)
+        self.assertEqual((response["result"]["current_song_time"], response["result"]["is_playing"]), (8.0, True))
+        self.assertEqual(self.script.scheduled_delays, [])
+
+    def test_handler_errors_come_back_as_error_status(self):
+        response = self.send("set_clip_color", track_index=0, clip_index=0)
+        self.assertEqual(response["status"], "error")
+        self.assertIn("exactly one", response["message"])
+
+
 if __name__ == "__main__":
     unittest.main()
