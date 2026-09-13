@@ -212,5 +212,49 @@ class SelectedContextTest(unittest.TestCase):
         self.assertEqual(self.script._get_selected_context()["detail_clip"], {"name": "Bass A"})
 
 
+def live12_song(**extra):
+    mixer = Obj(volume=Obj(value=0.85), panning=Obj(value=0.5))
+    fields = dict(tempo=124.0, signature_numerator=4, signature_denominator=4, tracks=[], return_tracks=[],
+                  master_track=Obj(mixer_device=mixer))
+    fields.update(extra)
+    return Obj(**fields)
+
+
+class ScaleTest(unittest.TestCase):
+    def test_session_info_reports_scale(self):
+        script = make_script(live12_song(root_note=5, scale_name="Minor", scale_mode=True))
+        info = script._get_session_info()
+        self.assertEqual((info["root_note"], info["root_note_name"], info["scale_name"], info["scale_mode"]),
+                         (5, "F", "Minor", True))
+
+    def test_session_info_on_live_11_is_nulls(self):
+        info = make_script(live12_song())._get_session_info()
+        self.assertEqual((info["root_note"], info["root_note_name"], info["scale_name"]), (None, None, None))
+
+    def test_set_song_scale_sets_only_what_is_given(self):
+        song = live12_song(root_note=0, scale_name="Major", scale_mode=False)
+        result = make_script(song)._set_song_scale(root_note=9, scale_name="Dorian")
+        self.assertEqual((song.root_note, song.scale_name, song.scale_mode), (9, "Dorian", False))
+        self.assertEqual(result, {"root_note": 9, "root_note_name": "A", "scale_name": "Dorian",
+                                  "scale_mode": False})
+
+    def test_set_song_scale_rejects_bad_root_and_old_live(self):
+        with self.assertRaises(ValueError):
+            make_script(live12_song(root_note=0, scale_name="Major", scale_mode=False))._set_song_scale(root_note=12)
+        with self.assertRaisesRegex(Exception, "Live 12"):
+            make_script(live12_song())._set_song_scale(scale_name="Minor")
+
+    def test_clip_notes_include_clip_scale_only_when_exposed(self):
+        clip = Obj(name="c", length=4.0, is_midi_clip=True,
+                                     get_notes_extended=lambda **kwargs: [])
+        song = live12_song(tracks=[Obj(clip_slots=[Obj(has_clip=True,
+                                                                                          clip=clip)])])
+        script = make_script(song)
+        self.assertNotIn("scale_name", script._get_clip_notes(0, 0))
+        clip.root_note, clip.scale_name = 2, "Minor"
+        result = script._get_clip_notes(0, 0)
+        self.assertEqual((result["root_note_name"], result["scale_name"]), ("D", "Minor"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,8 @@ except ImportError:
 DEFAULT_PORT = 9877
 HOST = "localhost"
 
+NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
 
 def _is_number(value):
     """A finite int/float. bool is excluded: True would otherwise pass as pitch 1."""
@@ -321,7 +323,7 @@ class AbletonMCP(ControlSurface):
                                  "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
                                  "create_arrangement_midi_clip", "delete_arrangement_clip",
                                  "add_notes_to_clip", "set_clip_name", "set_clip_color", "set_track_color",
-                                 "set_tempo", "fire_clip", "stop_clip",
+                                 "set_tempo", "set_song_scale", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "play_arrangement",
                                  "load_browser_item",
                                  "load_instrument_or_effect",
@@ -399,6 +401,9 @@ class AbletonMCP(ControlSurface):
                         elif command_type == "set_tempo":
                             tempo = params.get("tempo", 120.0)
                             result = self._set_tempo(tempo)
+                        elif command_type == "set_song_scale":
+                            result = self._set_song_scale(params.get("root_note"), params.get("scale_name"),
+                                                          params.get("scale_mode"))
                         elif command_type == "fire_clip":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -630,6 +635,7 @@ class AbletonMCP(ControlSurface):
                     "panning": self._song.master_track.mixer_device.panning.value
                 }
             }
+            result.update(self._scale_fields(self._song))
             return result
         except Exception as e:
             self.log_message("Error getting session info: " + str(e))
@@ -852,6 +858,35 @@ class AbletonMCP(ControlSurface):
     def _color_fields(cls, obj):
         """color (0xRRGGBB) and color_index (0-69) as Live reports them, None if refused."""
         return {"color": cls._safe(obj, "color"), "color_index": cls._safe(obj, "color_index")}
+
+    @classmethod
+    def _scale_fields(cls, obj):
+        """Live 12 scale of a Song (or Clip, where exposed). All None before Live 12."""
+        root = cls._safe(obj, "root_note")
+        return {
+            "root_note": root,
+            "root_note_name": NOTE_NAMES[root] if isinstance(root, int) and 0 <= root < 12 else None,
+            "scale_name": cls._safe(obj, "scale_name"),
+            "scale_mode": cls._safe(obj, "scale_mode"),
+        }
+
+    def _set_song_scale(self, root_note=None, scale_name=None, scale_mode=None):
+        """Set the song's root note (0-11), scale name and/or scale mode (Live 12+)."""
+        try:
+            if self._safe(self._song, "scale_name") is None:
+                raise Exception("Song scale needs Live 12 or later")
+            if root_note is not None:
+                if isinstance(root_note, bool) or not isinstance(root_note, int) or not 0 <= root_note <= 11:
+                    raise ValueError("root_note must be an integer 0-11, got {0!r}".format(root_note))
+                self._song.root_note = root_note
+            if scale_name is not None:
+                self._song.scale_name = str(scale_name)
+            if scale_mode is not None:
+                self._song.scale_mode = bool(scale_mode)
+            return self._scale_fields(self._song)
+        except Exception as e:
+            self.log_message("Error setting song scale: " + str(e))
+            raise
 
     def _apply_color(self, obj, color_index, rgb):
         """Set exactly one of color_index / rgb, then read both back: Live snaps
@@ -1710,7 +1745,7 @@ class AbletonMCP(ControlSurface):
                     "velocity": note.velocity,
                     "mute": note.mute
                 })
-            return {
+            result = {
                 "track_index": track_index,
                 "clip_index": clip_index,
                 "clip_name": clip.name,
@@ -1718,6 +1753,10 @@ class AbletonMCP(ControlSurface):
                 "note_count": len(note_list),
                 "notes": note_list
             }
+            scale = self._scale_fields(clip)
+            if scale["scale_name"] is not None:
+                result.update(scale)
+            return result
         except Exception as e:
             self.log_message("Error getting clip notes: " + str(e))
             raise
@@ -1744,7 +1783,7 @@ class AbletonMCP(ControlSurface):
                     "velocity": note.velocity,
                     "mute": note.mute,
                 })
-            return {
+            result = {
                 "track_index": track_index,
                 "arrangement_clip_index": arrangement_clip_index,
                 "clip_name": clip.name,
@@ -1753,6 +1792,10 @@ class AbletonMCP(ControlSurface):
                 "note_count": len(note_list),
                 "notes": note_list,
             }
+            scale = self._scale_fields(clip)
+            if scale["scale_name"] is not None:
+                result.update(scale)
+            return result
         except Exception as e:
             self.log_message("Error getting arrangement clip notes: " + str(e))
             raise

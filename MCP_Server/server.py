@@ -112,7 +112,7 @@ class AbletonConnection:
             "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
             "create_arrangement_midi_clip", "delete_arrangement_clip",
             "add_notes_to_clip", "set_clip_name", "set_clip_color", "set_track_color",
-            "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
+            "set_tempo", "set_song_scale", "fire_clip", "stop_clip", "set_device_parameter",
             "batch_set_device_parameters",
             "start_playback", "stop_playback", "load_instrument_or_effect",
             "load_browser_item", "set_track_volume", "set_track_panning",
@@ -686,6 +686,34 @@ def set_tempo(ctx: Context, tempo: float) -> str:
         logger.error(f"Error setting tempo: {str(e)}")
         return f"Error setting tempo: {str(e)}"
 
+
+@mcp.tool()
+def set_song_scale(ctx: Context, root_note: Optional[Union[str, int]] = None, scale_name: Optional[str] = None,
+                   scale_mode: Optional[bool] = None) -> str:
+    """
+    Set the song's key (Live 12+). Pass any combination of:
+    - root_note: note name ("F#", "Gb") or 0-11 (0 = C)
+    - scale_name: as Live names it, e.g. "Major", "Minor", "Dorian"
+    - scale_mode: true to turn on Scale Mode (highlights and folds to the scale in clips)
+
+    Returns the scale Live reports back. The current scale is also in get_session_info.
+    """
+    try:
+        params = {}
+        if root_note is not None:
+            params["root_note"] = camelot.parse_root_note(root_note)
+        if scale_name is not None:
+            params["scale_name"] = scale_name
+        if scale_mode is not None:
+            params["scale_mode"] = scale_mode
+        if not params:
+            raise ValueError("Pass at least one of root_note, scale_name, scale_mode")
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_song_scale", params)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting song scale: {str(e)}")
+        return f"Error setting song scale: {str(e)}"
 
 @mcp.tool()
 def get_device_parameters(ctx: Context, track_index: int, device_index: int) -> str:
