@@ -317,7 +317,7 @@ class AbletonMCP(ControlSurface):
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
                                  "create_arrangement_midi_clip", "delete_arrangement_clip",
-                                 "add_notes_to_clip", "set_clip_name",
+                                 "add_notes_to_clip", "set_clip_name", "set_clip_color", "set_track_color",
                                  "set_tempo", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "play_arrangement",
                                  "load_browser_item",
@@ -387,6 +387,12 @@ class AbletonMCP(ControlSurface):
                             clip_index = params.get("clip_index", 0)
                             name = params.get("name", "")
                             result = self._set_clip_name(track_index, clip_index, name)
+                        elif command_type == "set_clip_color":
+                            result = self._set_clip_color(params.get("track_index", 0), params.get("clip_index", 0),
+                                                          params.get("color_index"), params.get("rgb"))
+                        elif command_type == "set_track_color":
+                            result = self._set_track_color(params.get("track_index", 0),
+                                                           params.get("color_index"), params.get("rgb"))
                         elif command_type == "set_tempo":
                             tempo = params.get("tempo", 120.0)
                             result = self._set_tempo(tempo)
@@ -643,6 +649,7 @@ class AbletonMCP(ControlSurface):
                         "is_playing": clip.is_playing,
                         "is_recording": clip.is_recording
                     }
+                    clip_info.update(self._color_fields(clip))
                 
                 clip_slots.append({
                     "index": slot_index,
@@ -693,6 +700,7 @@ class AbletonMCP(ControlSurface):
                 "clip_slots": clip_slots,
                 "devices": devices
             }
+            result.update(self._color_fields(track))
             return result
         except Exception as e:
             self.log_message("Error getting track info: " + str(e))
@@ -836,6 +844,54 @@ class AbletonMCP(ControlSurface):
             return str(param.str_for_value(param.value))
         except Exception:
             return None
+
+    @classmethod
+    def _color_fields(cls, obj):
+        """color (0xRRGGBB) and color_index (0-69) as Live reports them, None if refused."""
+        return {"color": cls._safe(obj, "color"), "color_index": cls._safe(obj, "color_index")}
+
+    def _apply_color(self, obj, color_index, rgb):
+        """Set exactly one of color_index / rgb, then read both back: Live snaps
+        arbitrary RGB to its nearest palette entry, so the read-back is the truth."""
+        if (color_index is None) == (rgb is None):
+            raise ValueError("Pass exactly one of color_index or rgb")
+        if color_index is not None:
+            if isinstance(color_index, bool) or not isinstance(color_index, int) or not 0 <= color_index <= 69:
+                raise ValueError("color_index must be an integer 0-69, got {0!r}".format(color_index))
+            obj.color_index = color_index
+        else:
+            if isinstance(rgb, bool) or not isinstance(rgb, int) or not 0 <= rgb <= 0xFFFFFF:
+                raise ValueError("rgb must be an integer 0x000000-0xFFFFFF, got {0!r}".format(rgb))
+            obj.color = rgb
+        return self._color_fields(obj)
+
+    def _set_clip_color(self, track_index, clip_index, color_index=None, rgb=None):
+        """Color a session clip by palette index or RGB."""
+        try:
+            track = self._get_track(track_index)
+            clip_slots = self._safe(track, "clip_slots", []) or []
+            if clip_index < 0 or clip_index >= len(clip_slots):
+                raise IndexError("Clip index out of range")
+            if not clip_slots[clip_index].has_clip:
+                raise Exception("No clip in slot")
+            clip = clip_slots[clip_index].clip
+            result = {"track_index": track_index, "clip_index": clip_index, "clip_name": clip.name}
+            result.update(self._apply_color(clip, color_index, rgb))
+            return result
+        except Exception as e:
+            self.log_message("Error setting clip color: " + str(e))
+            raise
+
+    def _set_track_color(self, track_index, color_index=None, rgb=None):
+        """Color a track (-1 master, -2/-3 returns) by palette index or RGB."""
+        try:
+            track = self._get_track(track_index)
+            result = {"track_index": track_index, "track_name": track.name}
+            result.update(self._apply_color(track, color_index, rgb))
+            return result
+        except Exception as e:
+            self.log_message("Error setting track color: " + str(e))
+            raise
 
     def _get_track(self, track_index):
         """Get a track by index. Use -1 for master track, -2/-3/etc for return tracks."""
@@ -1218,6 +1274,7 @@ class AbletonMCP(ControlSurface):
                         "is_midi_clip": clip.is_midi_clip if hasattr(clip, 'is_midi_clip') else False,
                         "is_audio_clip": is_audio,
                     }
+                    clip_info.update(self._color_fields(clip))
                     if is_audio and hasattr(clip, 'file_path'):
                         clip_info["file_path"] = clip.file_path
                     clips.append(clip_info)
@@ -1249,6 +1306,7 @@ class AbletonMCP(ControlSurface):
                             "is_midi_clip": clip.is_midi_clip if hasattr(clip, 'is_midi_clip') else False,
                             "is_audio_clip": is_audio,
                         }
+                        clip_info.update(self._color_fields(clip))
                         if is_audio and hasattr(clip, 'file_path'):
                             clip_info["file_path"] = clip.file_path
                         clips.append(clip_info)

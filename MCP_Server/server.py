@@ -8,8 +8,9 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Optional, Union
 
 try:
-    from MCP_Server import notation
+    from MCP_Server import camelot, notation
 except ImportError:  # launched as `python MCP_Server/server.py`
+    import camelot
     import notation
 
 # Configure logging
@@ -110,7 +111,7 @@ class AbletonConnection:
             "create_midi_track", "create_audio_track", "set_track_name",
             "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
             "create_arrangement_midi_clip", "delete_arrangement_clip",
-            "add_notes_to_clip", "set_clip_name",
+            "add_notes_to_clip", "set_clip_name", "set_clip_color", "set_track_color",
             "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
             "batch_set_device_parameters",
             "start_playback", "stop_playback", "load_instrument_or_effect",
@@ -607,6 +608,50 @@ def set_clip_name(ctx: Context, track_index: int, clip_index: int, name: str) ->
     except Exception as e:
         logger.error(f"Error setting clip name: {str(e)}")
         return f"Error setting clip name: {str(e)}"
+
+@mcp.tool()
+def set_clip_color(ctx: Context, track_index: int, clip_index: int, color: Optional[str] = None,
+                   color_index: Optional[int] = None, key: Optional[str] = None) -> str:
+    """
+    Color a session clip. Pass exactly one of:
+    - color: "#RRGGBB" — Live snaps it to the nearest entry in its 70-color palette
+    - color_index: 0-69, Live's palette index
+    - key: a musical key — "F minor", "F#m", "Bb" (major), "Ebmaj" — or a Camelot code like "8A".
+      Colors by Camelot number: relative major/minor share a color, and keys a fifth
+      apart get neighbouring hues, so harmonically compatible clips look alike.
+
+    Returns the color Live actually applied (plus the Camelot code for a key).
+    """
+    try:
+        color_params, code = camelot.resolve_color(color, color_index, key)
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_color", dict(
+            {"track_index": track_index, "clip_index": clip_index}, **color_params))
+        if code:
+            result["camelot"] = code
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting clip color: {str(e)}")
+        return f"Error setting clip color: {str(e)}"
+
+@mcp.tool()
+def set_track_color(ctx: Context, track_index: int, color: Optional[str] = None,
+                    color_index: Optional[int] = None) -> str:
+    """
+    Color a track. Pass exactly one of color ("#RRGGBB", snapped to Live's palette)
+    or color_index (0-69).
+
+    Parameters:
+    - track_index: 0+ for tracks, -1 for master, -2/-3 for return A/B
+    """
+    try:
+        color_params, _ = camelot.resolve_color(color, color_index)
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_color", dict({"track_index": track_index}, **color_params))
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting track color: {str(e)}")
+        return f"Error setting track color: {str(e)}"
 
 @mcp.tool()
 def set_tempo(ctx: Context, tempo: float) -> str:

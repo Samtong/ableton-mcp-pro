@@ -91,5 +91,53 @@ class CreateArrangementMidiClipTest(unittest.TestCase):
         self.assertEqual(created, [])
 
 
+class ColorTest(unittest.TestCase):
+    def setUp(self):
+        self.clip = Obj(name="Bass", length=4.0, is_playing=False, is_recording=False,
+                                          color=0, color_index=0)
+        slot = Obj(has_clip=True, clip=self.clip)
+        mixer = Obj(volume=Obj(value=0.85), sends=[],
+                                      panning=Obj(value=0.5))
+        self.track = Obj(name="BASS", clip_slots=[slot], devices=[], mixer_device=mixer,
+                                           color=0, color_index=0, arrangement_clips=[self.clip])
+        self.master = Obj(name="Main", color=0, color_index=0)
+        self.script = make_script(Obj(tracks=[self.track], return_tracks=[],
+                                                        master_track=self.master, scenes=[],
+                                                        tempo=120.0, signature_numerator=4,
+                                                        signature_denominator=4, song_length=16.0))
+
+    def test_set_clip_color_by_index_reads_back(self):
+        result = self.script._set_clip_color(0, 0, color_index=12)
+        self.assertEqual(self.clip.color_index, 12)
+        self.assertEqual(result["color_index"], 12)
+        self.assertEqual(result["clip_name"], "Bass")
+
+    def test_set_clip_color_by_rgb(self):
+        self.script._set_clip_color(0, 0, rgb=0xFF8800)
+        self.assertEqual(self.clip.color, 0xFF8800)
+
+    def test_exactly_one_and_ranges(self):
+        for kwargs in ({}, {"color_index": 1, "rgb": 1}, {"color_index": 70}, {"rgb": 0x1000000},
+                       {"color_index": True}):
+            with self.assertRaises(ValueError):
+                self.script._set_clip_color(0, 0, **kwargs)
+
+    def test_set_track_color_supports_master(self):
+        self.assertEqual(self.script._set_track_color(-1, color_index=3)["color_index"], 3)
+        self.assertEqual(self.master.color_index, 3)
+
+    def test_reads_include_colors(self):
+        self.clip.color, self.clip.color_index = 0x00FF00, 5
+        self.track.color, self.track.color_index = 0xFF0000, 9
+        info = self.script._get_track_info(0)
+        self.assertEqual((info["color"], info["color_index"]), (0xFF0000, 9))
+        self.assertEqual(info["clip_slots"][0]["clip"]["color_index"], 5)
+        clip_row = dict(start_time=0.0, end_time=4.0, is_midi_clip=True, is_audio_clip=False)
+        vars(self.clip).update(clip_row)
+        self.assertEqual(self.script._get_arrangement_clips(0)["clips"][0]["color_index"], 5)
+        full = self.script._get_full_arrangement()
+        self.assertEqual(full["tracks_with_clips"][0]["clips"][0]["color"], 0x00FF00)
+
+
 if __name__ == "__main__":
     unittest.main()
