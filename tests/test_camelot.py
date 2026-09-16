@@ -1,7 +1,17 @@
+import colorsys
+import json
+import pathlib
 import unittest
 
-from MCP_Server.camelot import (NOTE_NAMES, camelot_code, color_for_key, parse_hex_color,
+from MCP_Server.camelot import (NOTE_NAMES, camelot_code, palette_index_for_key, parse_hex_color,
                                 parse_root_note, pitch_class, resolve_color)
+
+LIVE12_PALETTE = json.loads((pathlib.Path(__file__).parent / "live12_palette.json").read_text())["colors"]
+
+
+def hsv(palette_index):
+    rgb = int(LIVE12_PALETTE[palette_index][1:], 16)
+    return colorsys.rgb_to_hsv((rgb >> 16) / 255.0, (rgb >> 8 & 255) / 255.0, (rgb & 255) / 255.0)
 
 # The wheel, straight from its definition.
 WHEEL = {
@@ -50,29 +60,43 @@ class CamelotCodeTest(unittest.TestCase):
                 camelot_code(bad)
 
 
-class ColorForKeyTest(unittest.TestCase):
-    def test_relative_keys_share_a_color_and_numbers_differ(self):
-        self.assertEqual(color_for_key("A minor"), color_for_key("C major"))
-        colors = {color_for_key("{0}A".format(n)) for n in range(1, 13)}
-        self.assertEqual(len(colors), 12)
-        for color in colors:
-            self.assertTrue(0 <= color <= 0xFFFFFF)
+class PaletteIndexForKeyTest(unittest.TestCase):
+    """Keys map straight to Live palette slots: RGB would be snapped by Live, and on
+    Live 12 Camelot 8 and 9 snapped to the same slot."""
 
-    def test_hues_are_30_degrees_apart_at_one_brightness(self):
-        import colorsys
+    def indices(self):
+        return [palette_index_for_key("{0}A".format(n)) for n in range(1, 13)]
+
+    def test_relative_keys_share_a_slot(self):
+        self.assertEqual(palette_index_for_key("A minor"), palette_index_for_key("C major"))
         for n in range(1, 13):
-            rgb = color_for_key("{0}B".format(n))
-            h, s, v = colorsys.rgb_to_hsv(rgb >> 16 & 255, rgb >> 8 & 255, rgb & 255)
-            self.assertAlmostEqual(h, (n - 1) / 12.0, delta=0.01)
-            self.assertAlmostEqual(s, 0.75, delta=0.01)
-            self.assertAlmostEqual(v, 0.95 * 255, delta=1.5)
+            self.assertEqual(palette_index_for_key("{0}A".format(n)), palette_index_for_key("{0}B".format(n)))
+
+    def test_twelve_distinct_slots_of_the_palette(self):
+        self.assertEqual(len(set(self.indices())), 12)
+        for index in self.indices():
+            self.assertTrue(0 <= index <= 69, index)
+
+    def test_slots_walk_round_the_hue_circle_in_wheel_order(self):
+        hues = [hsv(i)[0] * 360 for i in self.indices()]
+        self.assertEqual(hues, sorted(hues), "wheel neighbours must be hue neighbours")
+        gaps = [b - a for a, b in zip(hues, hues[1:])] + [360 - hues[-1] + hues[0]]
+        self.assertGreaterEqual(min(gaps), 15, gaps)
+
+    def test_slots_are_vivid(self):
+        # 0.5, not higher: Live 12's palette has no violet or purple above 0.53 that is
+        # also bright. The pastel row sits at 0.40-0.45, so this still excludes it.
+        for index in self.indices():
+            _, saturation, value = hsv(index)
+            self.assertGreaterEqual(saturation, 0.5, index)
+            self.assertGreaterEqual(value, 0.75, index)
 
 
 class ResolveColorTest(unittest.TestCase):
     def test_each_form(self):
         self.assertEqual(resolve_color(color="#ff8800"), ({"rgb": 0xFF8800}, None))
         self.assertEqual(resolve_color(color_index=12), ({"color_index": 12}, None))
-        self.assertEqual(resolve_color(key="F minor"), ({"rgb": color_for_key("4A")}, "4A"))
+        self.assertEqual(resolve_color(key="F minor"), ({"color_index": palette_index_for_key("4A")}, "4A"))
 
     def test_exactly_one(self):
         with self.assertRaisesRegex(ValueError, "none"):

@@ -5,7 +5,7 @@ import unittest
 from unittest import mock
 
 import MCP_Server.server as server
-from MCP_Server.camelot import color_for_key
+from MCP_Server.camelot import palette_index_for_key
 
 
 class FakeAbleton(object):
@@ -39,10 +39,11 @@ class ToolTestCase(unittest.TestCase):
 class SetClipColorTest(ToolTestCase):
     result = {"clip_name": "Bass", "color": 1, "color_index": 2}
 
-    def test_key_sends_its_camelot_color_and_names_the_code(self):
+    def test_key_sends_its_camelot_palette_slot_and_names_the_code(self):
         output = json.loads(server.set_clip_color(None, 1, 2, key="F minor"))
         self.assertEqual(self.ableton.sent,
-                         [("set_clip_color", {"track_index": 1, "clip_index": 2, "rgb": color_for_key("4A")})])
+                         [("set_clip_color", {"track_index": 1, "clip_index": 2,
+                                             "color_index": palette_index_for_key("4A")})])
         self.assertEqual(output["camelot"], "4A")
         self.assertEqual(output["color_index"], 2)
 

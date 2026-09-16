@@ -638,8 +638,8 @@ def set_clip_color(ctx: Context, track_index: int, clip_index: int, color: Optio
     - color: "#RRGGBB" — Live snaps it to the nearest of its 70 palette colors
     - color_index: 0-69, Live's palette index
     - key: a musical key — "F minor", "F#m", "Bb" (major), "Ebmaj" — or a Camelot code like "8A".
-      Colors by Camelot number: relative major/minor share a color and keys a fifth apart get
-      neighbouring hues, so harmonically compatible clips look alike.
+      Picks one of 12 vivid palette colors by Camelot number: relative major/minor share a
+      color and keys a fifth apart get neighbouring hues, so compatible clips look alike.
 
     Returns the color Live actually applied, plus the Camelot code when a key was given.
     """
@@ -697,7 +697,8 @@ def set_song_scale(ctx: Context, root_note: Optional[Union[str, int]] = None, sc
     """
     Set the song's key (Live 12+). Pass any combination of:
     - root_note: a note name ("F#", "Gb") or 0-11, where 0 is C
-    - scale_name: as Live names it — "Major", "Minor", "Dorian", ...
+    - scale_name: exactly as Live's Scale chooser shows it — "Major", "Minor", "Dorian", ...
+      Live 12 stores any string without checking it, so a typo is not reported.
     - scale_mode: true turns on Scale Mode (scale highlighting and fold in clips)
 
     Returns the scale Live reports back. The current scale is also in get_session_info.

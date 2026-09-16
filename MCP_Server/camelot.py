@@ -4,7 +4,6 @@ The Camelot wheel numbers the 24 keys so that harmonic neighbours are adjacent:
 the same number is a relative major/minor pair, and one step either way is a
 fifth. Coloring clips by number makes compatible material look alike in Live.
 """
-import colorsys
 import re
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -16,6 +15,11 @@ _KEY_RE = re.compile(r"^([a-g])([#b♯♭]*)(m|min|minor|maj|major)?$")
 # Tonic pitch class at position 1 of each side: 1A = G# minor, 1B = B major.
 # Each step round the wheel adds a fifth (7 semitones).
 _WHEEL_START = {"A": 8, "B": 11}
+# Live palette slot for Camelot numbers 1-12: vivid colors, walking round the hue
+# circle in wheel order (red 14 -> ... -> pink 12). Slots rather than RGB because
+# Live snaps RGB to its palette, and on Live 12 evenly spaced hues for 8 and 9
+# snapped to the same slot. Hues checked against tests/live12_palette.json.
+_CAMELOT_PALETTE = [14, 15, 17, 4, 19, 5, 6, 21, 9, 24, 11, 12]
 
 
 def _compact(text):
@@ -62,11 +66,9 @@ def camelot_code(key):
     return "{}{}".format(number, side)
 
 
-def color_for_key(key):
-    """0xRRGGBB for a key: one of 12 hues, shared by both sides of a Camelot number."""
-    number = int(camelot_code(key)[:-1])
-    r, g, b = colorsys.hsv_to_rgb((number - 1) / 12.0, 0.75, 0.95)
-    return (round(r * 255) << 16) | (round(g * 255) << 8) | round(b * 255)
+def palette_index_for_key(key):
+    """Live palette slot (0-69) for a key, shared by both sides of a Camelot number."""
+    return _CAMELOT_PALETTE[int(camelot_code(key)[:-1]) - 1]
 
 
 def parse_hex_color(text):
@@ -92,4 +94,4 @@ def resolve_color(color=None, color_index=None, key=None):
         if isinstance(color_index, bool) or not isinstance(color_index, int) or not 0 <= color_index <= 69:
             raise ValueError("color_index must be an integer 0-69, got {!r}".format(color_index))
         return {"color_index": color_index}, None
-    return {"rgb": color_for_key(key)}, camelot_code(key)
+    return {"color_index": palette_index_for_key(key)}, camelot_code(key)

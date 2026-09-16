@@ -49,9 +49,14 @@ Constraints that shape the design:
   Enharmonics resolve (`Gb` = `F#`). Built from theory, not copied from
   MIDIjourney, whose table has duplicates (`g# minor` in both 1 and 8,
   `c# major` in both 3 and 10) and two identical colors.
-- `color_for_key(key: str) -> int` — 12 hues 30° apart, one per Camelot number;
-  A (minor) and B (major) of the same number share the hue, which is the point of
-  the wheel: same color = relative keys, neighbouring color = compatible keys.
+- `palette_index_for_key(key: str) -> int` — one of 12 vivid Live palette slots per
+  Camelot number, in hue order round the wheel; A (minor) and B (major) of the same
+  number share it, which is the point of the wheel: same color = relative keys,
+  neighbouring color = compatible keys. A key sends `color_index`, not RGB.
+
+  *Revised after the live check:* the first version sent RGB hues 30° apart, and
+  Live 12 snapped Camelot 8 and 9 to the same palette slot. The slots are now chosen
+  from the palette read back from Live (`tests/live12_palette.json`).
 
 ## B. Reading the user's selection
 
@@ -130,7 +135,10 @@ MCP server changes:
   sets whichever are given, returns all three read back. Raises a clear error on
   Live < 12 (attribute absent).
 - `get_clip_notes` adds clip-level scale fields **only if** the clip object exposes
-  them; unverified on Live 12's LOM, so discovered at runtime, not assumed.
+  them. *Live check:* Live 12's Clip does not expose them, so they never appear today.
+- *Live check:* `Song.scale_name` accepts any string (`"NotAScale"` read back as-is).
+  No validation is added — there is no reliable list of Live's names to check against —
+  and the tool docstring says so.
 
 **MCP server** — `set_song_scale(root_note: str | int | None, scale_name, scale_mode)`;
 `root_note` accepts `"F#"`, `"Gb"`, or 0–11.
