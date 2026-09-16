@@ -7,6 +7,12 @@ from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Dict, Any, List, Optional, Union
 
+try:
+    from MCP_Server import camelot, notation
+except ImportError:  # launched as `python MCP_Server/server.py`
+    import camelot
+    import notation
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -105,8 +111,8 @@ class AbletonConnection:
             "create_midi_track", "create_audio_track", "set_track_name",
             "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
             "create_arrangement_midi_clip", "delete_arrangement_clip",
-            "add_notes_to_clip", "set_clip_name",
-            "set_tempo", "fire_clip", "stop_clip", "set_device_parameter",
+            "add_notes_to_clip", "set_clip_name", "set_clip_color", "set_track_color",
+            "set_tempo", "set_song_scale", "fire_clip", "stop_clip", "set_device_parameter",
             "batch_set_device_parameters",
             "start_playback", "stop_playback", "load_instrument_or_effect",
             "load_browser_item", "set_track_volume", "set_track_panning",
@@ -209,6 +215,11 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
         logger.info("AbletonMCP server shut down")
 
 # Create the MCP server with lifespan support
+def _check_note_format(format: str) -> None:
+    """Reject an unknown note format before a round trip to Ableton."""
+    if format not in notation.FORMATS:
+        raise ValueError(f"format must be one of {', '.join(notation.FORMATS)}, got {format!r}")
+
 mcp = FastMCP(
     "AbletonMCP",
     # description="Ableton Live integration through the Model Context Protocol",
@@ -309,6 +320,22 @@ def get_track_info(ctx: Context, track_index: int) -> str:
     except Exception as e:
         logger.error(f"Error getting track info from Ableton: {str(e)}")
         return f"Error getting track info: {str(e)}"
+
+@mcp.tool()
+def get_selected_context(ctx: Context) -> str:
+    """
+    What the user has selected in Live right now: track, scene, highlighted clip slot, the
+    clip open in the detail view (session or arrangement), selected device, and the playhead.
+    Use it when the user says "this track", "this clip" or "here" instead of asking for
+    indices. Anything with nothing selected is null.
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_selected_context")
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting selected context: {str(e)}")
+        return f"Error getting selected context: {str(e)}"
 
 @mcp.tool()
 def get_track_output_meter(
@@ -428,7 +455,8 @@ def create_audio_clip(ctx: Context, track_index: int, clip_index: int, file_path
         return f"Error creating audio clip: {str(e)}"
 
 @mcp.tool()
-def get_arrangement_clip_notes(ctx: Context, track_index: int, arrangement_clip_index: int) -> str:
+def get_arrangement_clip_notes(ctx: Context, track_index: int, arrangement_clip_index: int,
+                               format: str = "json") -> str:
     """
     Read MIDI notes from a clip in the arrangement view (not session view).
 
@@ -436,14 +464,17 @@ def get_arrangement_clip_notes(ctx: Context, track_index: int, arrangement_clip_
     - track_index: Index of the track
     - arrangement_clip_index: Index into track.arrangement_clips (0 = first arrangement clip on the track).
                               Get the index from `get_arrangement_clips`.
+    - format: "json" (default) or "csv" — a `# clip ...` line then `pitch,start,dur,vel,mute`
+              rows, far fewer tokens for a dense clip
     """
     try:
+        _check_note_format(format)
         ableton = get_ableton_connection()
         result = ableton.send_command("get_arrangement_clip_notes", {
             "track_index": track_index,
             "arrangement_clip_index": arrangement_clip_index,
         })
-        return json.dumps(result, indent=2)
+        return notation.render_clip(result, format)
     except Exception as e:
         logger.error(f"Error getting arrangement clip notes: {str(e)}")
         return f"Error getting arrangement clip notes: {str(e)}"
@@ -548,22 +579,26 @@ def create_arrangement_audio_clip(
 
 @mcp.tool()
 def add_notes_to_clip(
-    ctx: Context, 
-    track_index: int, 
-    clip_index: int, 
-    notes: List[Dict[str, Union[int, float, bool]]]
+    ctx: Context,
+    track_index: int,
+    clip_index: int,
+    notes: Union[List[Dict[str, Union[int, float, bool]]], str]
 ) -> str:
     """
     Add MIDI notes to a clip.
-    
+
     Parameters:
     - track_index: The index of the track containing the clip
     - clip_index: The index of the clip slot containing the clip
-    - notes: List of note dictionaries, each with pitch, start_time, duration, velocity, and mute
+    - notes: A list of note dicts (pitch and start_time required; duration, velocity, mute
+             optional), or the same notes as CSV text — `pitch,start,dur,vel[,mute]`, one note
+             per line, header optional. Invalid notes are rejected before anything is written.
     """
     try:
+        if isinstance(notes, str):
+            notes = notation.csv_to_notes(notes)
         ableton = get_ableton_connection()
-        result = ableton.send_command("add_notes_to_clip", {
+        ableton.send_command("add_notes_to_clip", {
             "track_index": track_index,
             "clip_index": clip_index,
             "notes": notes
@@ -596,6 +631,50 @@ def set_clip_name(ctx: Context, track_index: int, clip_index: int, name: str) ->
         return f"Error setting clip name: {str(e)}"
 
 @mcp.tool()
+def set_clip_color(ctx: Context, track_index: int, clip_index: int, color: Optional[str] = None,
+                   color_index: Optional[int] = None, key: Optional[str] = None) -> str:
+    """
+    Color a session clip. Pass exactly one of:
+    - color: "#RRGGBB" — Live snaps it to the nearest of its 70 palette colors
+    - color_index: 0-69, Live's palette index
+    - key: a musical key — "F minor", "F#m", "Bb" (major), "Ebmaj" — or a Camelot code like "8A".
+      Picks one of 12 vivid palette colors by Camelot number: relative major/minor share a
+      color and keys a fifth apart get neighbouring hues, so compatible clips look alike.
+
+    Returns the color Live actually applied, plus the Camelot code when a key was given.
+    """
+    try:
+        color_params, camelot_code = camelot.resolve_color(color, color_index, key)
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_clip_color", dict(
+            {"track_index": track_index, "clip_index": clip_index}, **color_params))
+        if camelot_code:
+            result["camelot"] = camelot_code
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting clip color: {str(e)}")
+        return f"Error setting clip color: {str(e)}"
+
+@mcp.tool()
+def set_track_color(ctx: Context, track_index: int, color: Optional[str] = None,
+                    color_index: Optional[int] = None) -> str:
+    """
+    Color a track. Pass exactly one of color ("#RRGGBB", snapped to Live's palette)
+    or color_index (0-69).
+
+    Parameters:
+    - track_index: 0+ for tracks, -1 for master, -2/-3 for return A/B
+    """
+    try:
+        color_params, _ = camelot.resolve_color(color, color_index)
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_track_color", dict({"track_index": track_index}, **color_params))
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting track color: {str(e)}")
+        return f"Error setting track color: {str(e)}"
+
+@mcp.tool()
 def set_tempo(ctx: Context, tempo: float) -> str:
     """
     Set the tempo of the Ableton session.
@@ -611,6 +690,35 @@ def set_tempo(ctx: Context, tempo: float) -> str:
         logger.error(f"Error setting tempo: {str(e)}")
         return f"Error setting tempo: {str(e)}"
 
+
+@mcp.tool()
+def set_song_scale(ctx: Context, root_note: Optional[Union[str, int]] = None, scale_name: Optional[str] = None,
+                   scale_mode: Optional[bool] = None) -> str:
+    """
+    Set the song's key (Live 12+). Pass any combination of:
+    - root_note: a note name ("F#", "Gb") or 0-11, where 0 is C
+    - scale_name: exactly as Live's Scale chooser shows it — "Major", "Minor", "Dorian", ...
+      Live 12 stores any string without checking it, so a typo is not reported.
+    - scale_mode: true turns on Scale Mode (scale highlighting and fold in clips)
+
+    Returns the scale Live reports back. The current scale is also in get_session_info.
+    """
+    try:
+        params = {}
+        if root_note is not None:
+            params["root_note"] = camelot.parse_root_note(root_note)
+        if scale_name is not None:
+            params["scale_name"] = scale_name
+        if scale_mode is not None:
+            params["scale_mode"] = scale_mode
+        if not params:
+            raise ValueError("Pass at least one of root_note, scale_name, scale_mode")
+        ableton = get_ableton_connection()
+        result = ableton.send_command("set_song_scale", params)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting song scale: {str(e)}")
+        return f"Error setting song scale: {str(e)}"
 
 @mcp.tool()
 def get_device_parameters(ctx: Context, track_index: int, device_index: int) -> str:
@@ -1490,21 +1598,24 @@ def set_clip_loop(ctx: Context, track_index: int, clip_index: int, loop_start: f
         return f"Error setting clip loop: {str(e)}"
 
 @mcp.tool()
-def get_clip_notes(ctx: Context, track_index: int, clip_index: int) -> str:
+def get_clip_notes(ctx: Context, track_index: int, clip_index: int, format: str = "json") -> str:
     """
     Get all MIDI notes from a clip.
 
     Parameters:
     - track_index: The index of the track
     - clip_index: The index of the clip slot
+    - format: "json" (default) or "csv" — a `# clip ...` line then `pitch,start,dur,vel,mute`
+              rows, far fewer tokens for a dense clip
     """
     try:
+        _check_note_format(format)
         ableton = get_ableton_connection()
         result = ableton.send_command("get_clip_notes", {
             "track_index": track_index,
             "clip_index": clip_index
         })
-        return json.dumps(result, indent=2)
+        return notation.render_clip(result, format)
     except Exception as e:
         logger.error(f"Error getting clip notes: {str(e)}")
         return f"Error getting clip notes: {str(e)}"

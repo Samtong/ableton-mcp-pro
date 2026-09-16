@@ -53,6 +53,13 @@ Roadmap for achieving full Ableton control via MCP.
 - [x] **Get clip envelope** — `get_clip_envelope(track_index, clip_index, device_index, parameter_index)` — read automation data
 - [x] **Clear clip envelope** — `clear_clip_envelope(track_index, clip_index, device_index, parameter_index)`
 
+### Musical Context (ported from MIDIjourney)
+- [x] **Clip / track colors** — `set_clip_color(track_index, clip_index, color | color_index | key)`, `set_track_color(...)`; a `key` colors by Camelot number
+- [x] **Selection** — `get_selected_context()` — selected track, scene, highlighted slot, detail clip, device
+- [x] **Note validation** — invalid notes are rejected with their index before anything is written
+- [x] **CSV notation** — `format="csv"` on note reads, CSV accepted by `add_notes_to_clip`
+- [x] **Song scale (Live 12)** — `set_song_scale(root_note, scale_name, scale_mode)`; scale in `get_session_info`
+
 ### Advanced
 - [x] **Undo** — `undo()`
 - [x] **Redo** — `redo()`

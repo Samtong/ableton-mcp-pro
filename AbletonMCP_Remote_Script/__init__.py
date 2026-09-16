@@ -4,6 +4,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 from _Framework.ControlSurface import ControlSurface
 import socket
 import json
+import math
 import threading
 import time
 import traceback
@@ -17,6 +18,56 @@ except ImportError:
 # Constants for socket communication
 DEFAULT_PORT = 9877
 HOST = "localhost"
+
+NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def _is_number(value):
+    """A finite int/float. bool is excluded: True would otherwise pass as pitch 1."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def validate_notes(notes):
+    """Check note dicts and convert them to the tuples Clip.set_notes expects.
+
+    Raises ValueError naming the offending notes, so nothing half-written ever
+    reaches a clip. pitch and start_time are required: silently landing a
+    note with no pitch on C3 hides the caller's bug.
+    """
+    live_notes = []
+    problems = []
+    for i, note in enumerate(notes):
+        if not isinstance(note, dict):
+            problems.append("note {0}: expected an object, got {1!r}".format(i, note))
+            continue
+        pitch = note.get("pitch")
+        start_time = note.get("start_time")
+        duration = note.get("duration", 0.25)
+        velocity = note.get("velocity", 100)
+        mute = note.get("mute", False)
+        reasons = []
+        if not _is_number(pitch) or pitch != int(pitch) or not 0 <= pitch <= 127:
+            reasons.append("pitch must be an integer 0-127, got {0!r}".format(pitch))
+        if not _is_number(start_time) or start_time < 0:
+            reasons.append("start_time must be a number >= 0, got {0!r}".format(start_time))
+        if not _is_number(duration) or duration <= 0:
+            reasons.append("duration must be a number > 0, got {0!r}".format(duration))
+        if not _is_number(velocity) or not 0 <= velocity <= 127:
+            reasons.append("velocity must be a number 0-127, got {0!r}".format(velocity))
+        if not isinstance(mute, bool):
+            reasons.append("mute must be true or false, got {0!r}".format(mute))
+        if reasons:
+            problems.append("note {0}: {1}".format(i, ", ".join(reasons)))
+        else:
+            velocity = int(velocity) if velocity == int(velocity) else float(velocity)
+            live_notes.append((int(pitch), float(start_time), float(duration), velocity, mute))
+    if problems:
+        shown = problems[:5]
+        if len(problems) > 5:
+            shown.append("and {0} more".format(len(problems) - 5))
+        raise ValueError("Invalid notes: " + "; ".join(shown))
+    return live_notes
 
 def create_instance(c_instance):
     """Create and return the AbletonMCP script instance"""
@@ -246,6 +297,8 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._get_full_arrangement()
             elif command_type == "get_locators":
                 response["result"] = self._get_locators()
+            elif command_type == "get_selected_context":
+                response["result"] = self._get_selected_context()
             elif command_type == "get_clip_notes":
                 track_index = params.get("track_index", 0)
                 clip_index = params.get("clip_index", 0)
@@ -269,8 +322,8 @@ class AbletonMCP(ControlSurface):
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
                                  "create_arrangement_midi_clip", "delete_arrangement_clip",
-                                 "add_notes_to_clip", "set_clip_name",
-                                 "set_tempo", "fire_clip", "stop_clip",
+                                 "add_notes_to_clip", "set_clip_name", "set_clip_color", "set_track_color",
+                                 "set_tempo", "set_song_scale", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "play_arrangement",
                                  "load_browser_item",
                                  "load_instrument_or_effect",
@@ -339,9 +392,18 @@ class AbletonMCP(ControlSurface):
                             clip_index = params.get("clip_index", 0)
                             name = params.get("name", "")
                             result = self._set_clip_name(track_index, clip_index, name)
+                        elif command_type == "set_clip_color":
+                            result = self._set_clip_color(params.get("track_index", 0), params.get("clip_index", 0),
+                                                          params.get("color_index"), params.get("rgb"))
+                        elif command_type == "set_track_color":
+                            result = self._set_track_color(params.get("track_index", 0),
+                                                           params.get("color_index"), params.get("rgb"))
                         elif command_type == "set_tempo":
                             tempo = params.get("tempo", 120.0)
                             result = self._set_tempo(tempo)
+                        elif command_type == "set_song_scale":
+                            result = self._set_song_scale(params.get("root_note"), params.get("scale_name"),
+                                                          params.get("scale_mode"))
                         elif command_type == "fire_clip":
                             track_index = params.get("track_index", 0)
                             clip_index = params.get("clip_index", 0)
@@ -573,6 +635,7 @@ class AbletonMCP(ControlSurface):
                     "panning": self._song.master_track.mixer_device.panning.value
                 }
             }
+            result.update(self._scale_fields(self._song))
             return result
         except Exception as e:
             self.log_message("Error getting session info: " + str(e))
@@ -595,6 +658,7 @@ class AbletonMCP(ControlSurface):
                         "is_playing": clip.is_playing,
                         "is_recording": clip.is_recording
                     }
+                    clip_info.update(self._color_fields(clip))
                 
                 clip_slots.append({
                     "index": slot_index,
@@ -645,6 +709,7 @@ class AbletonMCP(ControlSurface):
                 "clip_slots": clip_slots,
                 "devices": devices
             }
+            result.update(self._color_fields(track))
             return result
         except Exception as e:
             self.log_message("Error getting track info: " + str(e))
@@ -788,6 +853,164 @@ class AbletonMCP(ControlSurface):
             return str(param.str_for_value(param.value))
         except Exception:
             return None
+
+    @classmethod
+    def _color_fields(cls, obj):
+        """color (0xRRGGBB) and color_index (0-69) as Live reports them, None if refused."""
+        return {"color": cls._safe(obj, "color"), "color_index": cls._safe(obj, "color_index")}
+
+    @classmethod
+    def _scale_fields(cls, obj):
+        """Live 12 scale of a Song (or Clip, where exposed). All None before Live 12."""
+        root = cls._safe(obj, "root_note")
+        return {
+            "root_note": root,
+            "root_note_name": NOTE_NAMES[root] if isinstance(root, int) and 0 <= root < 12 else None,
+            "scale_name": cls._safe(obj, "scale_name"),
+            "scale_mode": cls._safe(obj, "scale_mode"),
+        }
+
+    def _set_song_scale(self, root_note=None, scale_name=None, scale_mode=None):
+        """Set the song's root note (0-11), scale name and/or scale mode (Live 12+)."""
+        try:
+            if self._safe(self._song, "scale_name") is None:
+                raise Exception("Song scale needs Live 12 or later")
+            if root_note is not None:
+                if isinstance(root_note, bool) or not isinstance(root_note, int) or not 0 <= root_note <= 11:
+                    raise ValueError("root_note must be an integer 0-11, got {0!r}".format(root_note))
+                self._song.root_note = root_note
+            if scale_name is not None:
+                self._song.scale_name = str(scale_name)
+            if scale_mode is not None:
+                self._song.scale_mode = bool(scale_mode)
+            return self._scale_fields(self._song)
+        except Exception as e:
+            self.log_message("Error setting song scale: " + str(e))
+            raise
+
+    def _apply_color(self, obj, color_index, rgb):
+        """Set exactly one of color_index / rgb, then read both back: Live snaps
+        arbitrary RGB to its nearest palette entry, so the read-back is the truth."""
+        if (color_index is None) == (rgb is None):
+            raise ValueError("Pass exactly one of color_index or rgb")
+        if color_index is not None:
+            if isinstance(color_index, bool) or not isinstance(color_index, int) or not 0 <= color_index <= 69:
+                raise ValueError("color_index must be an integer 0-69, got {0!r}".format(color_index))
+            obj.color_index = color_index
+        else:
+            if isinstance(rgb, bool) or not isinstance(rgb, int) or not 0 <= rgb <= 0xFFFFFF:
+                raise ValueError("rgb must be an integer 0x000000-0xFFFFFF, got {0!r}".format(rgb))
+            obj.color = rgb
+        return self._color_fields(obj)
+
+    def _set_clip_color(self, track_index, clip_index, color_index=None, rgb=None):
+        """Color a session clip by palette index or RGB."""
+        try:
+            track = self._get_track(track_index)
+            clip_slots = self._safe(track, "clip_slots", []) or []
+            if clip_index < 0 or clip_index >= len(clip_slots):
+                raise IndexError("Clip index out of range")
+            if not clip_slots[clip_index].has_clip:
+                raise Exception("No clip in slot")
+            clip = clip_slots[clip_index].clip
+            result = {"track_index": track_index, "clip_index": clip_index, "clip_name": clip.name}
+            result.update(self._apply_color(clip, color_index, rgb))
+            return result
+        except Exception as e:
+            self.log_message("Error setting clip color: " + str(e))
+            raise
+
+    def _set_track_color(self, track_index, color_index=None, rgb=None):
+        """Color a track (-1 master, -2/-3 returns) by palette index or RGB."""
+        try:
+            track = self._get_track(track_index)
+            result = {"track_index": track_index, "track_name": track.name}
+            result.update(self._apply_color(track, color_index, rgb))
+            return result
+        except Exception as e:
+            self.log_message("Error setting track color: " + str(e))
+            raise
+
+    @staticmethod
+    def _index_in(items, obj):
+        """Position of a Live object in a Live list, by equality (wrappers are not identical)."""
+        for i, item in enumerate(items):
+            if item == obj:
+                return i
+        return None
+
+    def _track_index_of(self, track):
+        """Project convention: 0+ tracks, -1 master, -2 - i for return track i."""
+        index = self._index_in(self._song.tracks, track)
+        if index is not None:
+            return index
+        index = self._index_in(self._song.return_tracks, track)
+        if index is not None:
+            return -2 - index
+        if track == self._song.master_track:
+            return -1
+        return None
+
+    def _describe_clip_slot(self, slot):
+        track = slot.canonical_parent
+        return {
+            "track_index": self._track_index_of(track),
+            "clip_index": self._index_in(track.clip_slots, slot),
+            "has_clip": slot.has_clip,
+            "clip_name": slot.clip.name if slot.has_clip else None,
+        }
+
+    def _describe_clip(self, clip):
+        info = {"name": clip.name}
+        try:
+            parent = clip.canonical_parent
+            if self._safe(clip, "is_arrangement_clip", False):
+                info.update({
+                    "view": "arrangement",
+                    "track_index": self._track_index_of(parent),
+                    "arrangement_clip_index": self._index_in(parent.arrangement_clips, clip),
+                    "start_time": clip.start_time,
+                })
+            else:
+                slot = self._describe_clip_slot(parent)
+                info.update({"view": "session", "track_index": slot["track_index"],
+                             "clip_index": slot["clip_index"]})
+        except Exception as e:
+            self.log_message("Could not locate detail clip: " + str(e))
+        return info
+
+    def _get_selected_context(self):
+        """What the user has selected in Live. Each part is None when Live has
+        nothing selected there or cannot resolve it, never an error."""
+        view = self._song.view
+        context = {
+            "selected_track": None,
+            "selected_scene": None,
+            "highlighted_clip_slot": None,
+            "detail_clip": None,
+            "selected_device": None,
+            "current_song_time": self._safe(self._song, "current_song_time"),
+            "is_playing": self._safe(self._song, "is_playing"),
+        }
+        track = self._safe(view, "selected_track")
+        if track is not None:
+            context["selected_track"] = {"index": self._track_index_of(track), "name": track.name}
+            device = self._safe(self._safe(track, "view"), "selected_device")
+            if device is not None:
+                context["selected_device"] = {"index": self._index_in(track.devices, device), "name": device.name}
+        scene = self._safe(view, "selected_scene")
+        if scene is not None:
+            context["selected_scene"] = {"index": self._index_in(self._song.scenes, scene), "name": scene.name}
+        slot = self._safe(view, "highlighted_clip_slot")
+        if slot is not None:
+            try:
+                context["highlighted_clip_slot"] = self._describe_clip_slot(slot)
+            except Exception as e:
+                self.log_message("Could not locate highlighted clip slot: " + str(e))
+        clip = self._safe(view, "detail_clip")
+        if clip is not None:
+            context["detail_clip"] = self._describe_clip(clip)
+        return context
 
     def _get_track(self, track_index):
         """Get a track by index. Use -1 for master track, -2/-3/etc for return tracks."""
@@ -1170,6 +1393,7 @@ class AbletonMCP(ControlSurface):
                         "is_midi_clip": clip.is_midi_clip if hasattr(clip, 'is_midi_clip') else False,
                         "is_audio_clip": is_audio,
                     }
+                    clip_info.update(self._color_fields(clip))
                     if is_audio and hasattr(clip, 'file_path'):
                         clip_info["file_path"] = clip.file_path
                     clips.append(clip_info)
@@ -1201,6 +1425,7 @@ class AbletonMCP(ControlSurface):
                             "is_midi_clip": clip.is_midi_clip if hasattr(clip, 'is_midi_clip') else False,
                             "is_audio_clip": is_audio,
                         }
+                        clip_info.update(self._color_fields(clip))
                         if is_audio and hasattr(clip, 'file_path'):
                             clip_info["file_path"] = clip.file_path
                         clips.append(clip_info)
@@ -1520,7 +1745,7 @@ class AbletonMCP(ControlSurface):
                     "velocity": note.velocity,
                     "mute": note.mute
                 })
-            return {
+            result = {
                 "track_index": track_index,
                 "clip_index": clip_index,
                 "clip_name": clip.name,
@@ -1528,6 +1753,10 @@ class AbletonMCP(ControlSurface):
                 "note_count": len(note_list),
                 "notes": note_list
             }
+            scale = self._scale_fields(clip)
+            if scale["scale_name"] is not None:
+                result.update(scale)
+            return result
         except Exception as e:
             self.log_message("Error getting clip notes: " + str(e))
             raise
@@ -1554,7 +1783,7 @@ class AbletonMCP(ControlSurface):
                     "velocity": note.velocity,
                     "mute": note.mute,
                 })
-            return {
+            result = {
                 "track_index": track_index,
                 "arrangement_clip_index": arrangement_clip_index,
                 "clip_name": clip.name,
@@ -1563,6 +1792,10 @@ class AbletonMCP(ControlSurface):
                 "note_count": len(note_list),
                 "notes": note_list,
             }
+            scale = self._scale_fields(clip)
+            if scale["scale_name"] is not None:
+                result.update(scale)
+            return result
         except Exception as e:
             self.log_message("Error getting arrangement clip notes: " + str(e))
             raise
@@ -2049,6 +2282,7 @@ class AbletonMCP(ControlSurface):
         notes: optional list of note dicts to seed the clip with.
         """
         try:
+            live_notes = validate_notes(notes) if notes else []
             if track_index < 0 or track_index >= len(self._song.tracks):
                 raise IndexError("Track index out of range")
 
@@ -2067,15 +2301,7 @@ class AbletonMCP(ControlSurface):
             clip = track.create_midi_clip(start, length_val)
 
             note_count = 0
-            if notes and clip is not None:
-                live_notes = []
-                for n in notes:
-                    pitch = n.get("pitch", 60)
-                    start_time = n.get("start_time", 0.0)
-                    duration = n.get("duration", 0.25)
-                    velocity = n.get("velocity", 100)
-                    mute = n.get("mute", False)
-                    live_notes.append((pitch, start_time, duration, velocity, mute))
+            if live_notes and clip is not None:
                 clip.set_notes(tuple(live_notes))
                 note_count = len(live_notes)
 
@@ -2178,6 +2404,7 @@ class AbletonMCP(ControlSurface):
     def _add_notes_to_clip(self, track_index, clip_index, notes):
         """Add MIDI notes to a clip"""
         try:
+            live_notes = validate_notes(notes)
             if track_index < 0 or track_index >= len(self._song.tracks):
                 raise IndexError("Track index out of range")
             
@@ -2192,18 +2419,7 @@ class AbletonMCP(ControlSurface):
                 raise Exception("No clip in slot")
             
             clip = clip_slot.clip
-            
-            # Convert note data to Live's format
-            live_notes = []
-            for note in notes:
-                pitch = note.get("pitch", 60)
-                start_time = note.get("start_time", 0.0)
-                duration = note.get("duration", 0.25)
-                velocity = note.get("velocity", 100)
-                mute = note.get("mute", False)
-                
-                live_notes.append((pitch, start_time, duration, velocity, mute))
-            
+
             # Add the notes
             clip.set_notes(tuple(live_notes))
             
