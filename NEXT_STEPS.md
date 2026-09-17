@@ -22,6 +22,7 @@ Roadmap for achieving full Ableton control via MCP.
 - [x] **Master/return track support** — `track_index: -1` for master, `-2`/`-3` for returns
 - [x] **Arm track** — `set_track_arm(track_index, arm)`
 - [x] **Send levels** — `set_send_level(track_index, send_index, value)`
+- [x] **Input routing** — `get_track_routing(track_index)`, `set_track_input_routing(track_index, routing_type, routing_channel)` by display name, e.g. another track's "Post FX" MIDI to record what a MIDI effect plays
 - [x] **Set time signature** — `set_time_signature(numerator, denominator)`
 - [x] **Metronome** — `set_metronome(on)`
 
@@ -100,7 +101,7 @@ After Ableton restarts or swaps documents, cached `self._song` becomes invalid. 
 - [ ] **Audio clip from file** — If M4L bridge works, `create_audio_clip(track_index, clip_index, file_path)` for wav/aiff/flac/mp3
 
 ### Mixing & Routing
-- [ ] **Track routing** — `set_track_input/output(track_index, routing_type, channel)`
+- [ ] **Output routing** — `set_track_output_routing(track_index, routing_type, channel)` (input routing is done)
 
 ### Nice-to-Haves
 - [ ] **Capture MIDI** — `song.capture_midi()`

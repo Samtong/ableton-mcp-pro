@@ -284,6 +284,58 @@ class ScaleTest(unittest.TestCase):
         self.assertEqual((result["root_note_name"], result["scale_name"]), ("D", "Minor"))
 
 
+def routing(name):
+    return Obj(display_name=name)
+
+
+class RoutingTest(unittest.TestCase):
+    """Input routing is set by display name, since Live wants its own RoutingType objects."""
+
+    def setUp(self):
+        self.ext, self.twisted = routing("Ext: All Ins"), routing("TWISTED MIND")
+        self.all_ch, self.post_fx = routing("All Channels"), routing("Post FX")
+        self.channels = {self.ext: [self.all_ch], self.twisted: [routing("Pre FX"), self.post_fx]}
+        owner = self
+
+        class Track(Obj):
+            @property
+            def available_input_routing_channels(self):
+                return owner.channels[self.input_routing_type]
+
+        self.track = Track(name="SNIFF", available_input_routing_types=[self.ext, self.twisted],
+                           input_routing_type=self.ext, input_routing_channel=self.all_ch,
+                           output_routing_type=routing("Main"), output_routing_channel=routing(""),
+                           available_output_routing_types=[routing("Main")],
+                           available_output_routing_channels=[routing("")])
+        self.script = make_script(Obj(tracks=[self.track], return_tracks=[], master_track=None))
+
+    def test_get_track_routing_lists_current_and_available_names(self):
+        result = self.script._get_track_routing(0)
+        self.assertEqual(result["input_routing_type"], "Ext: All Ins")
+        self.assertEqual(result["input_routing_channel"], "All Channels")
+        self.assertEqual(result["available_input_routing_types"], ["Ext: All Ins", "TWISTED MIND"])
+        self.assertEqual(result["available_input_routing_channels"], ["All Channels"])
+        self.assertEqual(result["output_routing_type"], "Main")
+
+    def test_sets_type_then_channel_from_the_new_type_list(self):
+        result = self.script._set_track_input_routing(0, "twisted mind", "Post FX")
+        self.assertIs(self.track.input_routing_type, self.twisted)
+        self.assertIs(self.track.input_routing_channel, self.post_fx)
+        self.assertEqual((result["input_routing_type"], result["input_routing_channel"]),
+                         ("TWISTED MIND", "Post FX"))
+
+    def test_type_only_keeps_live_default_channel(self):
+        self.script._set_track_input_routing(0, "TWISTED MIND")
+        self.assertIs(self.track.input_routing_type, self.twisted)
+        self.assertIs(self.track.input_routing_channel, self.all_ch)
+
+    def test_unknown_names_list_the_options(self):
+        with self.assertRaisesRegex(ValueError, "TWISTED MIND"):
+            self.script._set_track_input_routing(0, "Nope")
+        with self.assertRaisesRegex(ValueError, "Pre FX"):
+            self.script._set_track_input_routing(0, "TWISTED MIND", "Mid FX")
+
+
 class DispatchTest(unittest.TestCase):
     """Commands reach their handlers through _process_command, mutations via the main thread."""
 
@@ -321,6 +373,25 @@ class DispatchTest(unittest.TestCase):
         response = self.send("get_selected_context")
         self.assertEqual(response["status"], "success", response)
         self.assertEqual((response["result"]["current_song_time"], response["result"]["is_playing"]), (8.0, True))
+        self.assertEqual(self.script.scheduled_delays, [])
+
+    def route_track(self):
+        for side in ("input", "output"):
+            setattr(self.track, side + "_routing_type", routing("Main"))
+            setattr(self.track, side + "_routing_channel", routing(""))
+            setattr(self.track, "available_" + side + "_routing_types", [routing("Ext: All Ins")])
+            setattr(self.track, "available_" + side + "_routing_channels", [])
+
+    def test_set_track_input_routing_runs_on_the_main_thread(self):
+        self.route_track()
+        response = self.send("set_track_input_routing", track_index=0, routing_type="Ext: All Ins")
+        self.assertEqual(response["status"], "success", response)
+        self.assertEqual(self.script.scheduled_delays, [0])
+
+    def test_get_track_routing_is_read_without_scheduling(self):
+        self.route_track()
+        response = self.send("get_track_routing", track_index=0)
+        self.assertEqual(response["status"], "success", response)
         self.assertEqual(self.script.scheduled_delays, [])
 
     def test_handler_errors_come_back_as_error_status(self):

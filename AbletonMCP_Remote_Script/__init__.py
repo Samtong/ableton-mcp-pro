@@ -297,6 +297,8 @@ class AbletonMCP(ControlSurface):
                 response["result"] = self._get_full_arrangement()
             elif command_type == "get_locators":
                 response["result"] = self._get_locators()
+            elif command_type == "get_track_routing":
+                response["result"] = self._get_track_routing(params.get("track_index", 0))
             elif command_type == "get_selected_context":
                 response["result"] = self._get_selected_context()
             elif command_type == "get_clip_notes":
@@ -338,6 +340,7 @@ class AbletonMCP(ControlSurface):
                                  "create_audio_track", "delete_track",
                                  "delete_device", "duplicate_track", "set_clip_loop",
                                  "set_track_arm", "set_send_level", "set_time_signature",
+                                 "set_track_input_routing",
                                  "set_metronome", "set_clip_envelope", "clear_clip_envelope",
                                  "remove_notes_from_clip",
                                  "undo", "redo", "ensure_cue_at_current_time", "remove_cue_at_current_time",
@@ -519,6 +522,10 @@ class AbletonMCP(ControlSurface):
                             track_index = params.get("track_index", 0)
                             arm = params.get("arm", False)
                             result = self._set_track_arm(track_index, arm)
+                        elif command_type == "set_track_input_routing":
+                            result = self._set_track_input_routing(params.get("track_index", 0),
+                                                                   params.get("routing_type"),
+                                                                   params.get("routing_channel"))
                         elif command_type == "set_send_level":
                             track_index = params.get("track_index", 0)
                             send_index = params.get("send_index", 0)
@@ -1845,6 +1852,37 @@ class AbletonMCP(ControlSurface):
         except Exception as e:
             self.log_message("Error setting track arm: " + str(e))
             raise
+
+    def _get_track_routing(self, track_index):
+        """Current and available input/output routings of a track, by display name"""
+        track = self._get_track(track_index)
+        result = {"track_index": track_index, "track_name": track.name}
+        for side in ("input", "output"):
+            for part in ("type", "channel"):
+                current = getattr(track, "{0}_routing_{1}".format(side, part))
+                available = getattr(track, "available_{0}_routing_{1}s".format(side, part))
+                result["{0}_routing_{1}".format(side, part)] = current.display_name if current is not None else None
+                result["available_{0}_routing_{1}s".format(side, part)] = [r.display_name for r in available]
+        return result
+
+    @staticmethod
+    def _routing_by_name(options, name, what):
+        for option in options:
+            if option.display_name.lower() == str(name).lower():
+                return option
+        raise ValueError("Unknown {0} '{1}'. Available: {2}".format(
+            what, name, ", ".join(o.display_name for o in options)))
+
+    def _set_track_input_routing(self, track_index, routing_type, routing_channel=None):
+        """Set a track's input routing type (and optionally channel) by display name"""
+        track = self._get_track(track_index)
+        track.input_routing_type = self._routing_by_name(
+            track.available_input_routing_types, routing_type, "input routing type")
+        # The channel list depends on the type just set, so read it afterwards
+        if routing_channel is not None:
+            track.input_routing_channel = self._routing_by_name(
+                track.available_input_routing_channels, routing_channel, "input routing channel")
+        return self._get_track_routing(track_index)
 
     def _set_send_level(self, track_index, send_index, value):
         """Set send level for a track"""

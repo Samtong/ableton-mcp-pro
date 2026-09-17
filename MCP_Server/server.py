@@ -125,6 +125,7 @@ class AbletonConnection:
             "delete_track", "record_arrangement",
             "delete_device", "duplicate_track", "set_clip_loop",
             "set_track_arm", "set_send_level", "set_time_signature", "set_metronome",
+            "set_track_input_routing",
             "set_clip_envelope", "clear_clip_envelope",
             "undo", "redo", "ensure_cue_at_current_time", "remove_cue_at_current_time",
             "rename_cue_at_current_time"
@@ -1640,6 +1641,45 @@ def set_track_arm(ctx: Context, track_index: int, arm: bool) -> str:
     except Exception as e:
         logger.error(f"Error setting track arm: {str(e)}")
         return f"Error setting track arm: {str(e)}"
+
+@mcp.tool()
+def get_track_routing(ctx: Context, track_index: int) -> str:
+    """
+    Get a track's input/output routing (type and channel) and the available options, by name.
+
+    Parameters:
+    - track_index: The index of the track
+    """
+    try:
+        ableton = get_ableton_connection()
+        result = ableton.send_command("get_track_routing", {"track_index": track_index})
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error getting track routing: {str(e)}")
+        return f"Error getting track routing: {str(e)}"
+
+@mcp.tool()
+def set_track_input_routing(ctx: Context, track_index: int, routing_type: str,
+                            routing_channel: Optional[str] = None) -> str:
+    """
+    Set where a track takes its input from, e.g. another track's MIDI output to record
+    what a MIDI effect (sequencer, arpeggiator) actually plays.
+
+    Parameters:
+    - track_index: The index of the track
+    - routing_type: Display name as listed by get_track_routing (e.g. "TWISTED MIND", "Ext: All Ins")
+    - routing_channel: Optional display name (e.g. "Post FX", "All Channels"); Live's default if omitted
+    """
+    try:
+        ableton = get_ableton_connection()
+        params = {"track_index": track_index, "routing_type": routing_type}
+        if routing_channel is not None:
+            params["routing_channel"] = routing_channel
+        result = ableton.send_command("set_track_input_routing", params)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error setting input routing: {str(e)}")
+        return f"Error setting input routing: {str(e)}"
 
 @mcp.tool()
 def set_send_level(ctx: Context, track_index: int, send_index: int, value: float) -> str:
