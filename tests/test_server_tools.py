@@ -174,6 +174,25 @@ class FakeSocket(object):
         return json.dumps({"status": "success", "result": {}}).encode("utf-8")
 
 
+class TrackRoutingToolsTest(ToolTestCase):
+    result = {"track_name": "SNIFF", "input_routing_type": "TWISTED MIND", "input_routing_channel": "Post FX"}
+
+    def test_set_input_routing_sends_names(self):
+        output = json.loads(server.set_track_input_routing(None, 19, "TWISTED MIND", "Post FX"))
+        self.assertEqual(self.ableton.sent, [("set_track_input_routing", {
+            "track_index": 19, "routing_type": "TWISTED MIND", "routing_channel": "Post FX"})])
+        self.assertEqual(output["input_routing_channel"], "Post FX")
+
+    def test_channel_is_optional(self):
+        server.set_track_input_routing(None, 2, "Ext: All Ins")
+        self.assertEqual(self.ableton.sent, [("set_track_input_routing", {
+            "track_index": 2, "routing_type": "Ext: All Ins"})])
+
+    def test_get_track_routing(self):
+        json.loads(server.get_track_routing(None, 4))
+        self.assertEqual(self.ableton.sent, [("get_track_routing", {"track_index": 4})])
+
+
 class ModifyingCommandTimeoutTest(unittest.TestCase):
     """State-modifying commands get the longer timeout and settle delays."""
 
@@ -184,11 +203,13 @@ class ModifyingCommandTimeoutTest(unittest.TestCase):
         return sock.timeouts[-1]
 
     def test_new_mutations_are_modifying(self):
-        for command_type in ("set_clip_color", "set_track_color", "set_song_scale"):
+        for command_type in ("set_clip_color", "set_track_color", "set_song_scale",
+                             "set_track_input_routing"):
             self.assertEqual(self.timeout_for(command_type), 15.0, command_type)
 
     def test_selection_read_is_not(self):
         self.assertEqual(self.timeout_for("get_selected_context"), 10.0)
+        self.assertEqual(self.timeout_for("get_track_routing"), 10.0)
 
 
 if __name__ == "__main__":
