@@ -12,7 +12,7 @@ Control Ableton Live through MCP tools. This project has two parts:
 - **Normalized ↔ dB**: track volume is `dB = (pos − 0.85) × 40` (0.85 = 0 dB, 1.0 = +6 dB); a send is the same slope shifted to top out at 0 dB, `dB = (pos − 1.0) × 40`, and steepens below pos 0.40. Both verified against Live's display — but read `volume_db` / `display_value` back after writing rather than trusting the formula
 - **Clip positions**: In beats (4.0 = 1 bar at 4/4)
 - **MIDI notes**: pitch 0–127, velocity 0–127. Live names middle C (pitch 60) **C3**, so C1=36, C2=48, C4=72 — match Live's own display, not the C4=60 convention
-- **Arrangement is read-only** — can only populate via `record_arrangement` from session clips
+- **Arrangement editing needs Live 12** — `create_arrangement_midi_clip`, `create_arrangement_audio_clip` and `delete_arrangement_clip` write the arrangement directly (MIDI uses `Track.create_midi_clip` on 12.1.10+, a temporary session clip + `duplicate_clip_to_arrangement` on 12.0.x). On Live 11 the only way in is `record_arrangement` from session clips
 
 ## Music Production Skills
 

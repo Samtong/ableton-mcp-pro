@@ -511,7 +511,10 @@ def create_arrangement_midi_clip(
     """
     Create a MIDI clip directly in the arrangement view at a given position.
     Optionally seed it with notes in one call.
-    Requires Live 11+ (uses Track.create_midi_clip API).
+    Requires Live 12. Live 12.1.10+ uses Track.create_midi_clip; Live 12.0.x builds
+    the clip in an empty session slot (borrowing a scene if the track has none),
+    copies it with Track.duplicate_clip_to_arrangement, then deletes the session copy.
+    Any arrangement material under the new clip is replaced.
 
     Parameters:
     - track_index: Index of a MIDI track
@@ -551,7 +554,7 @@ def create_arrangement_audio_clip(
 ) -> str:
     """
     Create an audio clip in the arrangement view at a given position.
-    Requires Live 11+ (uses Track.create_audio_clip API).
+    Requires Live 12 (uses Track.create_audio_clip, absent from Live 11).
 
     Parameters:
     - track_index: Index of an audio track

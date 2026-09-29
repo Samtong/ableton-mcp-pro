@@ -2313,10 +2313,50 @@ class AbletonMCP(ControlSurface):
             self.log_message("Error creating clip: " + str(e))
             raise
     
+    @staticmethod
+    def _arrangement_clip_at(track, clip, start):
+        """The arrangement clip Live just created, and its index in track.arrangement_clips.
+
+        Before Live 12.2, Track.create_midi_clip / create_audio_clip return None,
+        so fall back to the clip that starts at `start`.
+        """
+        clips = list(track.arrangement_clips)
+        if clip is not None:
+            index = AbletonMCP._index_in(clips, clip)
+            if index is not None:
+                return clip, index
+        for i, candidate in enumerate(clips):
+            if abs(float(candidate.start_time) - start) < 0.001:
+                return candidate, i
+        return clip, -1
+
+    def _midi_clip_via_session(self, track, start, length, live_notes):
+        """Live 12.0.x has no Track.create_midi_clip: build the clip in an empty
+        session slot, copy it with duplicate_clip_to_arrangement, then remove it.
+        Borrows a new scene when the track has no empty slot."""
+        borrowed_scene = None
+        slot = next((s for s in track.clip_slots if not s.has_clip), None)
+        if slot is None:
+            borrowed_scene = len(self._song.scenes)
+            self._song.create_scene(-1)
+            slot = track.clip_slots[borrowed_scene]
+        try:
+            slot.create_clip(length)
+            try:
+                if live_notes:
+                    slot.clip.set_notes(tuple(live_notes))
+                return track.duplicate_clip_to_arrangement(slot.clip, start)
+            finally:
+                slot.delete_clip()
+        finally:
+            if borrowed_scene is not None:
+                self._song.delete_scene(borrowed_scene)
+
     def _create_arrangement_midi_clip(self, track_index, time, length, notes=None):
         """Create a MIDI clip in the arrangement view at a given position with optional notes.
 
-        Uses Live 11+ Track.create_midi_clip(start_time, end_time) API.
+        Live 12.1.10+ has Track.create_midi_clip(start_time, length). Live 12.0.x
+        goes through a temporary session clip and Track.duplicate_clip_to_arrangement.
         notes: optional list of note dicts to seed the clip with.
         """
         try:
@@ -2329,37 +2369,32 @@ class AbletonMCP(ControlSurface):
             if not track.has_midi_input:
                 raise Exception("Track {0} is not a MIDI track".format(track_index))
 
-            if not hasattr(track, 'create_midi_clip'):
-                raise Exception("Live version does not support Track.create_midi_clip; need Live 11+")
-
             start = float(time)
             length_val = float(length)
-            # Live's Track.create_midi_clip takes (start_time, length) in beats,
-            # not (start_time, end_time) despite some docs suggesting otherwise.
-            clip = track.create_midi_clip(start, length_val)
-
-            note_count = 0
-            if live_notes and clip is not None:
-                clip.set_notes(tuple(live_notes))
-                note_count = len(live_notes)
-
-            # Find this clip's index in arrangement_clips so caller can refer to it later
-            arrangement_index = -1
-            try:
-                for i, ac in enumerate(track.arrangement_clips):
-                    if abs(float(ac.start_time) - start) < 0.001:
-                        arrangement_index = i
-                        break
-            except Exception:
-                pass
+            if hasattr(track, 'create_midi_clip'):
+                method = "create_midi_clip"
+                # (start_time, length) in beats, not (start_time, end_time).
+                clip, arrangement_index = self._arrangement_clip_at(
+                    track, track.create_midi_clip(start, length_val), start)
+                if live_notes and clip is not None:
+                    clip.set_notes(tuple(live_notes))
+            elif hasattr(track, 'duplicate_clip_to_arrangement'):
+                method = "duplicate_clip_to_arrangement"
+                clip, arrangement_index = self._arrangement_clip_at(
+                    track, self._midi_clip_via_session(track, start, length_val, live_notes), start)
+            else:
+                raise Exception("This Live version can't create arrangement MIDI clips: it needs "
+                                "Track.create_midi_clip (Live 12.1.10+) or "
+                                "Track.duplicate_clip_to_arrangement (Live 12.0)")
 
             return {
                 "track_index": track_index,
                 "start_time": start,
-                "length": float(length),
-                "note_count": note_count,
+                "length": length_val,
+                "note_count": len(live_notes) if clip is not None else 0,
                 "arrangement_clip_index": arrangement_index,
                 "name": clip.name if clip else "",
+                "method": method,
             }
         except Exception as e:
             self.log_message("Error creating arrangement MIDI clip: " + str(e))
@@ -2368,7 +2403,8 @@ class AbletonMCP(ControlSurface):
     def _create_arrangement_audio_clip(self, track_index, file_path, time, length=None):
         """Create an audio clip from a file path in the arrangement view at a given position.
 
-        Uses Live 11+ Track.create_audio_clip(file_path, position) API.
+        Uses Track.create_audio_clip(file_path, position), which Live 12 exposes
+        (present in 12.0.15; absent from Live 11).
         length is optional - if provided, the clip is trimmed/looped to that length.
         """
         try:
@@ -2381,23 +2417,26 @@ class AbletonMCP(ControlSurface):
                 raise Exception("Track {0} is not an audio track".format(track_index))
 
             if not hasattr(track, 'create_audio_clip'):
-                raise Exception("Live version does not support Track.create_audio_clip; need Live 11+")
+                raise Exception("This Live version has no Track.create_audio_clip; "
+                                "arrangement audio clips need Live 12")
 
-            # Live 11+ API: create_audio_clip(file_path, position) returns the new Clip
-            clip = track.create_audio_clip(file_path, float(time))
+            start = float(time)
+            clip, arrangement_index = self._arrangement_clip_at(
+                track, track.create_audio_clip(file_path, start), start)
 
             if length is not None and clip is not None:
                 try:
-                    clip.end_time = float(time) + float(length)
+                    clip.end_time = start + float(length)
                 except Exception:
                     pass  # length adjustment is best-effort
 
             result = {
                 "track_index": track_index,
                 "file_path": file_path,
-                "start_time": float(time),
+                "start_time": start,
                 "length": clip.length if clip else 0,
                 "name": clip.name if clip else "",
+                "arrangement_clip_index": arrangement_index,
             }
             return result
         except Exception as e:
