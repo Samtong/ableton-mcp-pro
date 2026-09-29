@@ -42,6 +42,8 @@ Roadmap for achieving full Ableton control via MCP.
 - [x] **Get arrangement clips** — `get_arrangement_clips(track_index)` — per-track
 - [x] **Get full arrangement** — `get_full_arrangement()` — all tracks, scenes, tempo
 - [x] **Record arrangement** — `record_arrangement(sections)` — beat-accurate with background threading
+- [x] **Create arrangement clips** — `create_arrangement_midi_clip(track_index, time, length, notes?)`, `create_arrangement_audio_clip(track_index, file_path, time, length?)` — Live 12 (MIDI via session fallback on 12.0.x)
+- [x] **Delete arrangement clip** — `delete_arrangement_clip(track_index, arrangement_clip_index)`
 
 ### Device Control
 - [x] **Get device parameters** — `get_device_parameters(track_index, device_index)`
@@ -69,8 +71,8 @@ Roadmap for achieving full Ableton control via MCP.
 
 ## Known Limitations
 
-### Arrangement Clips Are Read-Only
-The LOM cannot create, delete, or modify arrangement clips directly. The only way to populate the arrangement is by recording session clips into it using `record_arrangement`. To erase content, record an empty scene over the region.
+### Arrangement Clip Editing Depends on the Live Version
+Live 12 lets the LOM write the arrangement directly: `Track.create_midi_clip` (Live 12.1.10+), `Track.create_audio_clip`, `Track.delete_clip` and `Track.duplicate_clip_to_arrangement` (all present in 12.0.15). `create_arrangement_midi_clip` falls back to a temporary session clip + `duplicate_clip_to_arrangement` on 12.0.x. Before Live 12.2 the two `create_*` calls return nothing, so the new clip is looked up in `arrangement_clips` by start time. On Live 11 the only way to populate the arrangement is `record_arrangement`; to erase, record an empty scene over the region.
 
 ### Recording Timing (Solved)
 Scene transitions previously drifted ~4 beats due to `do_on_main` round-trip latency causing late fires that quantization pushed to the next bar. Fixed by using `fire_and_forget` (no round-trip wait) + 1-bar quantization. Scenes now fire 2 beats before the target boundary; quantization snaps to the correct bar. Pre-scheduling via `schedule_message(ticks, fn)` was also tried but failed — the tick rate is unreliable and caused early fires.

@@ -98,7 +98,75 @@ class AddNotesTest(unittest.TestCase):
         self.assertEqual(clip.written, ((60, 0.0, 0.25, 100, False),))
 
 
+class ArrangementClip(FakeClip):
+    def __init__(self, start_time, length, notes=None):
+        FakeClip.__init__(self)
+        self.start_time, self.length, self.written = start_time, length, notes
+
+
+class SessionSlot(object):
+    def __init__(self, clip=None):
+        self.clip = clip
+
+    @property
+    def has_clip(self):
+        return self.clip is not None
+
+    def create_clip(self, length):
+        self.clip = ArrangementClip(0.0, length)
+
+    def delete_clip(self):
+        self.clip = None
+
+
+class Live1215MidiTrack(Obj):
+    """A MIDI track as Live 12.1.10-12.1.x exposes it: create_midi_clip returns nothing."""
+
+    def __init__(self):
+        Obj.__init__(self, has_midi_input=True, arrangement_clips=[], clip_slots=[])
+
+    def create_midi_clip(self, start, length):
+        self.arrangement_clips.append(ArrangementClip(start, length))
+
+
+class Live120MidiTrack(Obj):
+    """A MIDI track as Live 12.0.x exposes it: no create_midi_clip, only duplicate_clip_to_arrangement."""
+
+    def __init__(self, slots):
+        Obj.__init__(self, has_midi_input=True, arrangement_clips=[], clip_slots=slots)
+
+    def duplicate_clip_to_arrangement(self, clip, destination_time):
+        copy = ArrangementClip(destination_time, clip.length, clip.written)
+        self.arrangement_clips.append(copy)
+        return copy
+
+
+def song_growing_scenes(tracks):
+    song = Obj(tracks=tracks, scenes=[Obj() for _ in tracks[0].clip_slots], deleted_scenes=[])
+
+    def create_scene(index):
+        song.scenes.append(Obj())
+        for track in tracks:
+            track.clip_slots.append(SessionSlot())
+
+    def delete_scene(index):
+        song.deleted_scenes.append(index)
+        del song.scenes[index]
+        for track in tracks:
+            del track.clip_slots[index]
+
+    song.create_scene, song.delete_scene = create_scene, delete_scene
+    return song
+
+
+NOTE = {"pitch": 60, "start_time": 0}
+NOTE_TUPLE = ((60, 0.0, 0.25, 100, False),)
+
+
 class CreateArrangementMidiClipTest(unittest.TestCase):
+    def send(self, song, **params):
+        return make_script(song)._process_command({"type": "create_arrangement_midi_clip", "params": params})
+
     def test_invalid_notes_create_no_clip(self):
         created = []
         track = Obj(has_midi_input=True, arrangement_clips=[],
@@ -107,6 +175,76 @@ class CreateArrangementMidiClipTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             script._create_arrangement_midi_clip(0, 0.0, 4.0, [{"pitch": 60}])
         self.assertEqual(created, [])
+
+    def test_native_clip_is_found_when_live_returns_nothing(self):
+        track = Live1215MidiTrack()
+        track.arrangement_clips.append(ArrangementClip(0.0, 4.0))
+        response = self.send(Obj(tracks=[track]), track_index=0, time=8.0, length=4.0, notes=[NOTE])
+        self.assertEqual(response["status"], "success", response)
+        self.assertEqual(track.arrangement_clips[1].written, NOTE_TUPLE)
+        self.assertEqual((response["result"]["arrangement_clip_index"], response["result"]["note_count"],
+                          response["result"]["method"]), (1, 1, "create_midi_clip"))
+
+    def test_live_12_0_goes_through_a_temporary_session_clip(self):
+        busy = SessionSlot(ArrangementClip(0.0, 1.0))
+        track = Live120MidiTrack([busy, SessionSlot()])
+        response = self.send(song_growing_scenes([track]), track_index=0, time=16.0, length=8.0, notes=[NOTE])
+        self.assertEqual(response["status"], "success", response)
+        [clip] = track.arrangement_clips
+        self.assertEqual((clip.start_time, clip.length, clip.written), (16.0, 8.0, NOTE_TUPLE))
+        self.assertEqual((response["result"]["arrangement_clip_index"], response["result"]["method"]),
+                         (0, "duplicate_clip_to_arrangement"))
+        self.assertIsNotNone(busy.clip, "an occupied slot is left alone")
+        self.assertFalse(track.clip_slots[1].has_clip, "the temporary session clip is removed")
+
+    def test_live_12_0_borrows_a_scene_when_every_slot_is_full(self):
+        track = Live120MidiTrack([SessionSlot(ArrangementClip(0.0, 1.0))])
+        song = song_growing_scenes([track])
+        response = self.send(song, track_index=0, time=0.0, length=4.0)
+        self.assertEqual(response["status"], "success", response)
+        self.assertEqual(len(track.arrangement_clips), 1)
+        self.assertEqual((song.deleted_scenes, len(song.scenes), len(track.clip_slots)), ([1], 1, 1))
+
+    def test_temporary_session_clip_is_removed_when_duplication_fails(self):
+        slot = SessionSlot()
+        track = Live120MidiTrack([slot])
+
+        def refuse(clip, destination_time):
+            raise RuntimeError("Track is frozen")
+
+        track.duplicate_clip_to_arrangement = refuse
+        response = self.send(song_growing_scenes([track]), track_index=0, time=0.0, length=4.0)
+        self.assertEqual(response["status"], "error")
+        self.assertIn("frozen", response["message"])
+        self.assertFalse(slot.has_clip)
+
+    def test_live_without_either_api_names_the_versions(self):
+        track = Obj(has_midi_input=True, arrangement_clips=[], clip_slots=[SessionSlot()])
+        response = self.send(Obj(tracks=[track]), track_index=0, time=0.0, length=4.0)
+        self.assertEqual(response["status"], "error")
+        self.assertIn("12.1.10", response["message"])
+        self.assertNotIn("Live 11+", response["message"])
+
+
+class CreateArrangementAudioClipTest(unittest.TestCase):
+    def send(self, song, **params):
+        return make_script(song)._process_command({"type": "create_arrangement_audio_clip", "params": params})
+
+    def test_clip_is_found_when_live_returns_nothing(self):
+        track = Obj(has_audio_input=True, arrangement_clips=[])
+        track.create_audio_clip = lambda path, position: track.arrangement_clips.append(
+            Obj(start_time=position, length=6.0, name="kick"))
+        response = self.send(Obj(tracks=[track]), track_index=0, file_path="/tmp/kick.wav", time=4.0)
+        self.assertEqual(response["status"], "success", response)
+        self.assertEqual((response["result"]["length"], response["result"]["name"],
+                          response["result"]["arrangement_clip_index"]), (6.0, "kick", 0))
+
+    def test_missing_api_does_not_claim_live_11_works(self):
+        track = Obj(has_audio_input=True, arrangement_clips=[])
+        response = self.send(Obj(tracks=[track]), track_index=0, file_path="/tmp/kick.wav", time=4.0)
+        self.assertEqual(response["status"], "error")
+        self.assertIn("Live 12", response["message"])
+        self.assertNotIn("Live 11+", response["message"])
 
 
 class ColorTest(unittest.TestCase):

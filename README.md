@@ -65,7 +65,7 @@ See the [Skill Authoring Guide](SKILL_AUTHORING_GUIDE.md) for best practices on 
 
 ### Prerequisites
 
-- Ableton Live 11+ (any edition)
+- Ableton Live 11+ (any edition); direct arrangement editing needs Live 12 — see [Arrangement](#arrangement)
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 
@@ -181,7 +181,12 @@ AI Assistant --> MCP Server (Python) --> TCP socket (port 9877) --> Remote Scrip
 `create_midi_track`, `create_audio_track`, `create_clip`, `create_audio_clip`, `add_notes_to_clip`, `set_clip_name`, `set_clip_loop`, `delete_clip`, `delete_arrangement_clip`, `duplicate_clip`, `delete_track`, `duplicate_track`, `set_track_name`, `set_track_volume`, `set_track_panning`, `set_track_mute`, `set_track_solo`, `set_track_arm`, `set_send_level`, `set_tempo`, `set_time_signature`, `set_metronome`, `fire_clip`, `stop_clip`, `fire_scene`, `create_scene`, `delete_scene`, `set_scene_name`, `start_playback`, `stop_playback`, `play_arrangement`, `load_instrument_or_effect`, `set_device_parameter`, `batch_set_device_parameters`, `delete_device`, `set_song_time`, `set_record_mode`, `set_arrangement_overdub`, `set_back_to_arranger`, `set_arrangement_loop`, `set_clip_envelope`, `clear_clip_envelope`, `undo`, `redo`, `set_clip_color`, `set_track_color`, `set_song_scale`, `set_track_input_routing`
 
 ### Arrangement
-The arrangement view supports a **full read-modify-write loop directly**, no session-view round-trip required:
+The arrangement view supports a **full read-modify-write loop directly**, no session-view round-trip required. The write tools need **Live 12**:
+
+- `create_arrangement_midi_clip` uses `Track.create_midi_clip` on Live 12.1.10+. On Live 12.0.x, which lacks it, the clip is built in an empty session slot (a scene is borrowed if the track has none), copied with `Track.duplicate_clip_to_arrangement`, and the session copy is deleted — so one call leaves several undo steps. The result's `method` field says which path ran.
+- `create_arrangement_audio_clip` uses `Track.create_audio_clip` and `delete_arrangement_clip` uses `Track.delete_clip`; both are present in Live 12.0.15.
+- Like pasting in Live, a new clip replaces any arrangement material underneath it.
+
 
 - `get_arrangement_clips(track_index)` — list clips on a track with `start_time`, `length`, and (for audio) `file_path` of the source sample.
 - `get_arrangement_clip_notes(track_index, arrangement_clip_index)` — read MIDI notes from any arrangement clip.
@@ -221,7 +226,7 @@ to generate melody continuations. The agent reads a clip with
 
 ## Known Limitations
 
-- **Arrangement clips are read-only** — The LOM can't create/delete arrangement clips directly. Use `record_arrangement` to record from session, or record an empty scene to erase.
+- **Arrangement editing needs Live 12** — On Live 11 the LOM can't create or delete arrangement clips; use `record_arrangement` to record from session, or record an empty scene to erase.
 - **Audio clip loading** — `ClipSlot.create_clip()` only accepts a length (for MIDI clips), not file paths. Audio clips must be dragged manually from Ableton's browser.
 - **Stale song reference** — First command after an Ableton restart may fail (retry works). The script auto-refreshes its internal reference.
 

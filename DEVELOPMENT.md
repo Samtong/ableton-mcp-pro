@@ -252,7 +252,7 @@ DS instruments (DS Kick, DS Snare, etc.) respond to any MIDI note — pitch 60 w
 
 ## Arrangement Recording
 
-The LOM does NOT support creating arrangement clips directly — they are read-only. The only way to build an arrangement is to **record session clips into the arrangement**.
+On Live 12, `create_arrangement_midi_clip` / `create_arrangement_audio_clip` / `delete_arrangement_clip` edit the arrangement directly (see the version notes in NEXT_STEPS.md, *Known Limitations*). On Live 11 the LOM can't create arrangement clips, so the only way to build an arrangement is to **record session clips into the arrangement** with the commands below.
 
 ### Available Commands
 

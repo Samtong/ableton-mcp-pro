@@ -169,3 +169,48 @@ disk** (analyze with soundfile), nothing else.
   re-export — predictions are close enough to save a manual-export round-trip.
 - True-peak ≤ −1 dBTP wants ceiling −1.5 (see Limiter note). LUFS premaster
   target −14..−10; leave it conservative (~−13) for a real mastering pass.
+
+## Ne jamais croire un message d'erreur de version sans l'avoir vérifié sur ce build
+
+`create_arrangement_midi_clip` échouait avec « Live version does not support
+Track.create_midi_clip; need Live 11+ ». Le message était faux sur les deux points :
+la méthode n'existe **pas** avant Live **12.1.10** (notes de version Live 12), et ce
+build est **12.0.15**. La page LOM de Cycling '74 liste les méthodes du Live le plus
+récent sans dire depuis quand elles existent — elle ne prouve donc rien sur ce build.
+
+Trois réflexes, dans cet ordre :
+
+1. **La version du build** :
+   `defaults read "/Applications/Ableton Live 12 Suite.app/Contents/Info.plist" CFBundleShortVersionString`
+2. **Ce que ce binaire expose vraiment**, sans redémarrer Live ni écrire de device M4L :
+   `strings -n 6 "/Applications/Ableton Live 12 Suite.app/Contents/MacOS/Live"` puis
+   chercher le nom de la méthode — les docstrings Python sont dans le binaire, groupées
+   par classe (les méthodes de `Track` sont à côté de `delete_clip`, `duplicate_clip_slot`).
+   C'est comme ça qu'on a établi que `create_audio_clip`, `delete_clip` et
+   `duplicate_clip_to_arrangement` sont là en 12.0.15, mais pas `create_midi_clip`.
+3. **Depuis quelle version** : les notes de version d'Ableton
+   (ableton.com/en/release-notes/live-12/ et live-12-beta), pas la doc LOM.
+   Attention aux fausses pistes : l'entrée « create_audio_clip / create_midi_clip » de
+   12.2 concerne `TakeLane`, pas `Track`, et un fil de forum qui parle de « 12.0.5 »
+   parlait de `ClipSlot.create_audio_clip` (Session), pas de la version Arrangement.
+
+Corollaire : un `hasattr(...)` suivi d'un `raise` est un **constat**, jamais une preuve
+de la version requise. Quand une méthode manque, chercher le chemin de repli qui existe
+sur ce build (ici : clip Session temporaire + `duplicate_clip_to_arrangement`) plutôt que
+de renvoyer « mets à jour Live ».
+
+## Avant Live 12.2, `Track.create_midi_clip` / `create_audio_clip` ne renvoient rien
+
+Le retour du clip créé n'est arrivé qu'en 12.2b13. Sur les versions antérieures l'appel
+renvoie `None` : les notes n'étaient donc jamais écrites, en silence, même sur les builds
+où la méthode existe (12.1.10 → 12.1.x). Ne pas se fier à la valeur de retour — retrouver
+le clip dans `track.arrangement_clips` par sa position de départ (`_arrangement_clip_at`).
+
+## La doc du repo dérive et finit par mentir
+
+CLAUDE.md, README.md et NEXT_STEPS.md affirmaient « Arrangement is read-only » alors que
+trois outils d'écriture d'arrangement existaient et étaient documentés ailleurs dans le
+même README. Quand une capacité change, corriger **tous** les fichiers d'un coup :
+`CLAUDE.md`, `README.md` (features + Known Limitations + prérequis), `NEXT_STEPS.md`,
+`DEVELOPMENT.md`, les docstrings de `MCP_Server/server.py` et `FEATURES.md`.
+Un `grep -rn` sur la formule périmée avant de clore, ça évite d'en oublier.
