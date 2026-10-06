@@ -109,6 +109,10 @@ Resampling") driven over MCP went catastrophic:
 
 ## Tempo automation makes transport position + metering unreadable over MCP
 
+> Correction (2026-10-02): the dead meters below were most likely the `back_to_arranger`
+> bug (see further down), not tempo automation. With the fix, meters and captures work
+> fine outside the tempo ramp.
+
 On a set with tempo automation (e.g. 128→135 BPM), during playback:
 - `get_arrangement_info.current_song_time` returns **garbage/near-frozen** beat
   values (jumps around, doesn't advance linearly).
@@ -214,3 +218,117 @@ même README. Quand une capacité change, corriger **tous** les fichiers d'un co
 `CLAUDE.md`, `README.md` (features + Known Limitations + prérequis), `NEXT_STEPS.md`,
 `DEVELOPMENT.md`, les docstrings de `MCP_Server/server.py` et `FEATURES.md`.
 Un `grep -rn` sur la formule périmée avant de clore, ça évite d'en oublier.
+
+## `play_arrangement` / `set_back_to_arranger` wrote `back_to_arranger = True` — that is the wrong way round
+
+`Song.back_to_arranger` reads **True while the arrangement is overridden** (a session
+clip was launched, or `stop_all_clips` stopped the tracks). Writing **False** is the
+"Back to Arrangement" button. The script wrote `True` in four places, right after
+`stop_all_clips()`: every track was left stopped, so `play_arrangement` played silence
+and every meter read 0 (night of 2026-10-02, time_do_not_travel). Fixed in the code
+(all four now write `False`); needs a Live restart to load. Until then the only way back
+is the button in Live's transport bar.
+
+Related transport facts, same session:
+- `start_playback` (`Song.start_playing`) starts from the **arrangement start marker**,
+  not from `current_song_time`. `set_song_time(x)` then `start_playback` plays from the
+  top. There is no `continue_playing` command yet.
+- Parameter readback does **not** show arrangement automation: a parameter with a known
+  lane (EQ gain −10 dB over bars 77–85) read its manual value both stopped and playing.
+  So arrangement automation cannot be verified over the API — only by ear or in the `.als`.
+
+## Meter deflection → dBFS: `dBFS = 76 × deflection − 70`
+
+Calibrated by stepping a group fader in known dB steps (0 to −48 dB) and reading
+`get_track_output_meter`: the deflection is linear in dB over the whole range at
+76 dB per unit, and 1.0 is the +6 dB top of Live's meter (so 0 dBFS ≈ 0.921). This
+replaces the narrower `70.75 × d − 66.44` fit. Readings on looping material still move
+±1.5 dB between runs with a 2 s window — compare tracks, don't chase tenths.
+
+Meters only work on what is actually playing: with the arrangement overridden, fire a
+session scene (`fire_scene`) and read the meters against that.
+
+## `duplicate_clip_to_arrangement`: the clean way to write the arrangement
+
+Copies a session clip with everything it carries. Three things to know:
+- **Audio clips** land with their full arrangement length (32 beats for a 16-beat loop
+  here), not their loop length, and a shortened loop is ignored. Back-to-back copies trim
+  each other; trim the last one by dropping a copy at the wanted end and deleting it.
+- An **empty MIDI clip** (`create_arrangement_midi_clip` with no notes) is a hole: it
+  replaces what is under it and splits the neighbours cleanly. That is how to cut a bar.
+- `delete_arrangement_clip` was safe throughout (clip counts on every other track checked
+  after each batch). The July truncation came from arrangement **recording**, not from it.
+
+## `create_arrangement_audio_clip` auto-warps one-shots
+
+Core Library FX samples came in warped and rounded to 4/8/16/32 beats, whatever their
+real duration. To make a riser end on a downbeat, place it, read the clip's `length`
+back, and re-place it at `target − length`.
+
+## `add_locator` is an MCP-server tool, not a Remote Script command
+
+Over raw TCP it is `set_song_time` → check with `get_arrangement_info` →
+`ensure_cue_at_current_time`. Names still cannot be set (see CuePoint above).
+
+## `fire_clip` refused empty slots, so session recording was unreachable
+
+Firing an empty slot on an armed track is how a session recording starts — and a session
+recording of a Resampling track is the safe way to capture the master (it never touches
+the arrangement). The guard now lets that through; needs a Live restart.
+"Start Recording on Scene Launch" is off by default, so `fire_scene` alone does not record.
+
+## Measuring the master without arrangement recording (works, 2026-10-02)
+
+Audio track `MIX_TEST`, input **Resampling** (`set_track_input_routing`), arm it,
+`play_arrangement(start)`, then `fire_clip` on one of its **empty** slots: Live records a
+session clip of the master. `stop_playback`, `delete_clip`, `set_back_to_arranger`. The
+file lands in `<project>/Samples/Recorded/`. Solo a group first to capture a stem.
+Forty captures in a row, arrangement clip counts unchanged on every track.
+
+- Give it one bar of pre-roll: the slot starts recording on the next bar line.
+- A transport that was stopped twice restarts from its start marker whatever
+  `current_song_time` says. Start playback, **then** `set_song_time` while it plays, and
+  check the position before trusting the capture.
+- If a capture aborts, the slot keeps its clip and the next `fire_clip` plays it back
+  instead of recording. Delete the clip first.
+- `mix_tests.py` prints text before its JSON: parse from the first line starting with `{`.
+
+Lesson from the mix itself: the meters said "basses a bit low"; the capture said "the kick
+alone is as loud as the whole mix". Solo captures per group (LUFS + octave bands) find the
+real imbalance in two minutes. Do that before touching a fader.
+
+## Clip-envelope automation in the arrangement: what was learned placing a dozen of them
+
+- A session clip's envelope **does** become arrangement automation through
+  `duplicate_clip_to_arrangement` (checked by solo capture: filtered inside the region,
+  open right after; pitch rising only where the clip sits).
+- The region before the clip keeps the parameter's static value even when the envelope
+  starts away from neutral. End the envelope on the neutral value anyway.
+- `get_device_parameters` and `get_track_info` return the **automated value at the
+  playhead**, not the static one. A send that "reverted" to −12 dB was an automation lane
+  already in the set: move the playhead and read again before concluding anything.
+  Static writes to an automated parameter do not hold — act elsewhere (the return level).
+- `Utility` → `Gain` is not a linear dB parameter (range −1..1). `(target−min)/(max−min)`
+  gave +35 dB. Bisect on the displayed value for anything that is not plainly linear.
+- A Configure'd VST parameter is automatable, but measure what it does before using it:
+  MiniFreak "Cutoff" on this patch thinned the lows instead of opening the top.
+
+## Offline rendering from master captures
+
+Captures start on a bar line at 48 kHz, so they can be cut on the beat grid with numpy and
+written back as new audio (the radio-scan intro: band-passed, overdriven, varispeed
+snippets of four sections between bursts of static). Name the file with its tempo and make
+it an exact number of bars so Live's auto-warp lands on the right length.
+
+## Before blaming one track for the master's peaks, mute it and re-capture
+
+Claimed "the kick peaks need clipping" from the full-mix PLR alone. Solo captures said
+otherwise: kick crest 7.4 dB, drum group 21 dB, stab synth 19.8 dB — and clipping those two
+by 5 dB each left the full-mix PLR unchanged (13.8 → 13.8). Leave-one-out mutes found it:
+the peaks are the stab landing on top of kick + bass, a sum, not any single track. That is
+bus limiting, i.e. the mastering limiter's job. Do the leave-one-out first; it is one
+10-second capture per group.
+
+A long capture loop hung for 30 minutes once (Live busy exporting): keep each Bash call to a
+few captures, and after any aborted run clear solo / arm and delete the leftover clip in
+the MIX_TEST slot before the next one.
