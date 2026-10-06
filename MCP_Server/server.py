@@ -501,6 +501,31 @@ def delete_arrangement_clip(ctx: Context, track_index: int, arrangement_clip_ind
         return f"Error deleting arrangement clip: {str(e)}"
 
 @mcp.tool()
+def duplicate_clip_to_arrangement(ctx: Context, track_index: int, clip_index: int,
+                                  time: float, length: Optional[float] = None) -> str:
+    """
+    Copy a session clip into the arrangement, keeping everything it carries
+    (warp, detune, clip envelopes, loop). Fills [time, time + length) with
+    back-to-back copies of the clip's loop; a final partial copy is trimmed.
+
+    Parameters:
+    - track_index: Index of the track
+    - clip_index: Session clip slot (= scene index) to copy from
+    - time: Arrangement position in beats
+    - length: Beats to fill (default: one loop of the clip)
+    """
+    try:
+        ableton = get_ableton_connection()
+        params = {"track_index": track_index, "clip_index": clip_index, "time": time}
+        if length is not None:
+            params["length"] = length
+        result = ableton.send_command("duplicate_clip_to_arrangement", params)
+        return json.dumps(result, indent=2)
+    except Exception as e:
+        logger.error(f"Error duplicating clip to arrangement: {str(e)}")
+        return f"Error duplicating clip to arrangement: {str(e)}"
+
+@mcp.tool()
 def create_arrangement_midi_clip(
     ctx: Context,
     track_index: int,
