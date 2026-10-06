@@ -1,10 +1,10 @@
 # Tout ce que ce repo sait faire
 
 Inventaire complet, du plus basique au plus obscur. Écrit pour être lu par un humain
-qui veut savoir quoi demander à l'assistant. Les 69 outils MCP sont tous listés.
+qui veut savoir quoi demander à l'assistant. Les 70 outils MCP sont tous listés.
 
 - **Remote Script** (`AbletonMCP_Remote_Script/__init__.py`) — tourne dans Live, écoute en TCP sur le port 9877.
-- **Serveur MCP** (`MCP_Server/server.py`) — expose les 69 outils à l'assistant.
+- **Serveur MCP** (`MCP_Server/server.py`) — expose les 70 outils à l'assistant.
 
 Tu peux aussi parler au Remote Script sans passer par MCP : envoie
 `{"type": "<commande>", "params": {...}}` en JSON sur `localhost:9877`.
@@ -80,6 +80,7 @@ ressemblent à l'œil. Le résultat renvoie aussi le code Camelot.
 
 | Outil | Ce que ça fait |
 |---|---|
+| `duplicate_clip_to_arrangement(track_index, clip_index, time, length?)` | Copie un clip Session dans l'arrangement **avec tout ce qu'il porte** (warp, enveloppes, boucle) et remplit `length` en boucles. Un clip audio arrive avec sa longueur d'arrangement entière : la dernière copie peut déborder |
 | `create_arrangement_midi_clip(track_index, time, length, notes?)` | Pose un clip MIDI à une position en beats, avec ses notes en un seul appel |
 | `create_arrangement_audio_clip(track_index, file_path, time, length?)` | Pose un échantillon à une position, par chemin de fichier |
 | `get_arrangement_clips(track_index)` | Liste les clips d'une piste : `start_time`, `length`, et le `file_path` de la source pour l'audio — pratique pour recopier un sample déjà présent |
@@ -94,12 +95,12 @@ Un nouveau clip **remplace** ce qui se trouve dessous, comme un collage dans Liv
 | Outil | Ce que ça fait |
 |---|---|
 | `get_arrangement_info()` | Position, mode enregistrement, boucle, état du transport, longueur du morceau |
-| `play_arrangement(time=0.0)` | Bascule en vue Arrangement, arrête les clips Session, lit depuis une position |
+| `play_arrangement(time=0.0)` | Arrête les clips Session, rend la main à l'arrangement et lit depuis une position |
 | `start_playback()` / `stop_playback()` | Play / stop |
 | `set_song_time(time)` | Déplace la tête de lecture. **Vérifie ensuite avec `get_arrangement_info`** : Live applique ça en asynchrone |
 | `set_record_mode(on)` | Arme l'enregistrement d'arrangement |
 | `set_arrangement_overdub(on)` | Superpose au lieu de remplacer |
-| `set_back_to_arranger()` | Rend la main à l'arrangement après un passage en Session |
+| `set_back_to_arranger()` | Le bouton « Back to Arrangement » : rend la main à l'arrangement après un passage en Session |
 | `set_arrangement_loop(on, start, length)` | Boucle d'arrangement |
 | `get_locators()` | Tous les repères (cue points), triés par position |
 | `add_locator(time, name)` | Pose un repère — « Intro », « Drop », « Break » |

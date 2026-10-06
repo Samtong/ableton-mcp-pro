@@ -324,6 +324,7 @@ class AbletonMCP(ControlSurface):
             elif command_type in ["create_midi_track", "set_track_name",
                                  "create_clip", "create_audio_clip", "create_arrangement_audio_clip",
                                  "create_arrangement_midi_clip", "delete_arrangement_clip",
+                                 "duplicate_clip_to_arrangement",
                                  "add_notes_to_clip", "set_clip_name", "set_clip_color", "set_track_color",
                                  "set_tempo", "set_song_scale", "fire_clip", "stop_clip",
                                  "start_playback", "stop_playback", "play_arrangement",
@@ -381,6 +382,10 @@ class AbletonMCP(ControlSurface):
                             length = params.get("length", 4.0)
                             notes = params.get("notes", None)
                             result = self._create_arrangement_midi_clip(track_index, time, length, notes)
+                        elif command_type == "duplicate_clip_to_arrangement":
+                            result = self._duplicate_clip_to_arrangement(
+                                params.get("track_index", 0), params.get("clip_index", 0),
+                                params.get("time", 0.0), params.get("length"))
                         elif command_type == "delete_arrangement_clip":
                             track_index = params.get("track_index", 0)
                             arrangement_clip_index = params.get("arrangement_clip_index", 0)
@@ -1221,11 +1226,15 @@ class AbletonMCP(ControlSurface):
             raise
 
     def _set_back_to_arranger(self):
-        """Return to arrangement view from session"""
+        """Hand playback back to the arrangement (the Back to Arrangement button).
+
+        Song.back_to_arranger reads True while session clips (or a stop-all-clips)
+        override the arrangement; writing False is the button press. Writing True
+        does nothing useful, and leaves every stopped track silent."""
         try:
-            self._song.back_to_arranger = True
+            self._song.back_to_arranger = False
             return {
-                "back_to_arranger": True
+                "back_to_arranger": self._song.back_to_arranger
             }
         except Exception as e:
             self.log_message("Error setting back to arranger: " + str(e))
@@ -1534,7 +1543,7 @@ class AbletonMCP(ControlSurface):
                 # Stop playback and prepare
                 do_on_main(lambda: self._song.stop_playing() if self._song.is_playing else None)
                 time_module.sleep(0.1)
-                do_on_main(lambda: setattr(self._song, 'back_to_arranger', True))
+                do_on_main(lambda: setattr(self._song, 'back_to_arranger', False))
                 time_module.sleep(0.05)
 
                 # Seek to start_time
@@ -1636,7 +1645,7 @@ class AbletonMCP(ControlSurface):
                 def cleanup():
                     self._song.clip_trigger_quantization = saved_quantization[0]
                     self._song.stop_all_clips()
-                    self._song.back_to_arranger = True
+                    self._song.back_to_arranger = False
                     self._song.current_song_time = 0.0
                 do_on_main(cleanup)
 
@@ -1805,6 +1814,58 @@ class AbletonMCP(ControlSurface):
             return result
         except Exception as e:
             self.log_message("Error getting arrangement clip notes: " + str(e))
+            raise
+
+    def _duplicate_clip_to_arrangement(self, track_index, clip_index, time, length=None):
+        """Copy a session clip into the arrangement with Track.duplicate_clip_to_arrangement,
+        which keeps everything the clip carries (warp, detune, envelopes, loop).
+
+        Fills [time, time + length) with back-to-back copies of the clip's loop. A last
+        partial copy is made by shortening the session clip's loop_end for the duration
+        of the copy, then restoring it. length defaults to one loop.
+
+        Audio clips: each copy lands with the clip's full arrangement length, not its
+        loop length, and a partial copy is not trimmed. Back-to-back copies trim each
+        other, but the last one can run past `length`; check with get_arrangement_clips.
+        """
+        try:
+            track = self._song.tracks[track_index]
+            slot = track.clip_slots[clip_index]
+            if not slot.has_clip:
+                raise Exception("No clip in track {0} slot {1}".format(track_index, clip_index))
+            clip = slot.clip
+            loop_len = float(clip.loop_end - clip.loop_start) if clip.looping else float(clip.length)
+            start = float(time)
+            end = start + (float(length) if length is not None else loop_len)
+            placed = []
+            pos = start
+            while pos < end - 1e-6:
+                remaining = end - pos
+                if remaining >= loop_len - 1e-6:
+                    track.duplicate_clip_to_arrangement(clip, pos)
+                    placed.append([pos, pos + loop_len])
+                    pos += loop_len
+                else:
+                    saved_loop_end = clip.loop_end
+                    saved_end_marker = clip.end_marker
+                    try:
+                        if clip.looping:
+                            clip.loop_end = clip.loop_start + remaining
+                        clip.end_marker = clip.start_marker + remaining
+                        track.duplicate_clip_to_arrangement(clip, pos)
+                    finally:
+                        if clip.looping:
+                            clip.loop_end = saved_loop_end
+                        clip.end_marker = saved_end_marker
+                    placed.append([pos, end])
+                    pos = end
+            in_range = [[float(c.start_time), float(c.end_time)]
+                        for c in track.arrangement_clips
+                        if float(c.end_time) > start + 1e-6 and float(c.start_time) < end - 1e-6]
+            return {"track_index": track_index, "clip_index": clip_index,
+                    "loop_length": loop_len, "placed": placed, "arrangement_clips_in_range": in_range}
+        except Exception as e:
+            self.log_message("Error duplicating clip to arrangement: " + str(e))
             raise
 
     def _delete_arrangement_clip(self, track_index, arrangement_clip_index):
@@ -2561,13 +2622,16 @@ class AbletonMCP(ControlSurface):
             
             clip_slot = track.clip_slots[clip_index]
             
-            if not clip_slot.has_clip:
+            # An empty slot on an armed track is a record button: firing it starts a
+            # session recording, which never touches the arrangement.
+            if not clip_slot.has_clip and not (track.can_be_armed and track.arm):
                 raise Exception("No clip in slot")
             
             clip_slot.fire()
             
             result = {
-                "fired": True
+                "fired": True,
+                "recording": not clip_slot.has_clip
             }
             return result
         except Exception as e:
@@ -2602,7 +2666,7 @@ class AbletonMCP(ControlSurface):
         """Stop session clips, return to arrangement, optionally seek, and play."""
         try:
             self._song.stop_all_clips()
-            self._song.back_to_arranger = True
+            self._song.back_to_arranger = False
             if time is not None:
                 self._song.current_song_time = float(time)
             self._song.start_playing()

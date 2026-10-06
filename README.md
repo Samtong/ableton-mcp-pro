@@ -192,6 +192,7 @@ The arrangement view supports a **full read-modify-write loop directly**, no ses
 - `get_arrangement_clip_notes(track_index, arrangement_clip_index)` — read MIDI notes from any arrangement clip.
 - `create_arrangement_audio_clip(track_index, file_path, time, length?)` — place a sample directly at a beat position. Pair with `file_path` from `get_arrangement_clips` to clone/remix existing samples.
 - `create_arrangement_midi_clip(track_index, time, length, notes?)` — create a MIDI clip and (optionally) seed all notes inline in one call.
+- `duplicate_clip_to_arrangement(track_index, clip_index, time, length?)` — copy a session clip into the arrangement with its warp, envelopes and loop, tiled to fill `length`. Audio copies land at their full arrangement length, so the last one can run past `length`.
 - `delete_arrangement_clip(track_index, arrangement_clip_index)` — remove a clip by index.
 - `record_arrangement(sections, start_time?)` — record session scenes into arrangement with bar-accurate transitions; `start_time` appends past existing material instead of overwriting from beat 0.
 
