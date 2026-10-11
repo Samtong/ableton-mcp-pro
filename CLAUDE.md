@@ -54,6 +54,10 @@ named. **MIDI pitch 60 is C3** in Live; give pitches as Hz + MIDI number.
 re-capture. Compare against a profile built from the user's own references
 (`make_profile.py`), not the generic profiles.
 
+**Sets from a newer Live.** Live 12.0.15 refuses `.als` files saved by 12.1+. Convert
+them with `tools/als_downgrade.py`, using one of the user's own 12.0.15 sets as the
+reference. Never overwrite the original.
+
 ## Working with the user
 
 The user drives Live's GUI: do not take control of the screen, ask for the clicks. They

@@ -141,3 +141,26 @@ MAESTRO + POP909 + GiantMIDI). Best results come from:
 First call ≈ 2–4s on CPU (download + model load + ~250 tokens). Subsequent
 calls in the same Python process reuse the loaded generator, so they run at
 ~70 notes/s. The bridge keeps the generator alive in a module-level cache.
+
+## als_downgrade.py — open a newer Live 12 set in an older Live 12
+
+Live refuses a set saved by a newer minor version (12.3 → 12.0 included) and has no
+"save as older version". This rewrites the `.als` so the older Live loads it. It needs a
+set saved by the **target** Live as a reference: whatever that set's XML never contains
+is treated as unknown to the target and removed.
+
+```bash
+python tools/als_downgrade.py "Newer.als" "Saved by my Live.als" "Newer (Live 12.0).als"
+```
+
+It copies the reference header, renames fields that changed name, drops elements and
+attributes the reference never has, adds fields the reference always writes, and empties
+the main track's clip slots (12.0 has none and crashes on them). It prints what it changed.
+
+- Pick a reference with lots of content (MIDI and audio tracks, devices, clips, a groove):
+  a field missing from it gets dropped even if the target knows it.
+- Devices that only exist in the newer Live (e.g. 12.1+ instruments) cannot be downgraded.
+- Errors Live gives on open name the culprit: `Unknown class 'X'`, `Unknown attribute 'X'`.
+  A crash right after loading means a structural difference: diff the parent/child paths
+  of both sets to find it.
+- Tested 12.3.6 → 12.0.15 on a set with audio tracks, Delay and Reverb returns.

@@ -225,6 +225,12 @@ to generate melody continuations. The agent reads a clip with
 `add_notes_to_clip` — no MCP server changes needed. See
 [tools/README.md](tools/README.md) for setup, dependencies, and usage.
 
+## Opening a Newer Live 12 Set in an Older Live 12
+
+`tools/als_downgrade.py` rewrites a `.als` saved by a newer Live 12 (e.g. 12.3) so an
+older one (e.g. 12.0) opens it, using a set saved by the older Live as the schema
+reference. See [tools/README.md](tools/README.md#als_downgradepy--open-a-newer-live-12-set-in-an-older-live-12).
+
 ## Known Limitations
 
 - **Arrangement editing needs Live 12** — On Live 11 the LOM can't create or delete arrangement clips; use `record_arrangement` to record from session, or record an empty scene to erase.
