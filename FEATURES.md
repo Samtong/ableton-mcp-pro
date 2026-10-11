@@ -167,6 +167,7 @@ Pour en écrire une : [SKILL_AUTHORING_GUIDE.md](SKILL_AUTHORING_GUIDE.md).
 - `.claude/skills/mixing-guide-mindpath/scripts/mix_tests.py` — valide un rendu master contre des seuils, en rouge/vert.
 - `.claude/skills/mixing-guide-mindpath/scripts/make_profile.py`, `make_rumble.py` — profils de référence et rumble de kick.
 - `tools/midigenai_bridge.py` — passe un clip dans le modèle MidiGenAI pour générer une suite de mélodie, puis réécrit le résultat avec `add_notes_to_clip`. Pas besoin de toucher au serveur MCP. Voir [tools/README.md](tools/README.md).
+- `tools/als_downgrade.py` — réécrit un set `.als` enregistré par un Live 12 plus récent (ex. 12.3) pour qu'il s'ouvre dans la 12.0.15, en prenant comme référence un set enregistré par la 12.0. Voir [tools/README.md](tools/README.md).
 
 ## Les tests
 
@@ -174,7 +175,7 @@ Pour en écrire une : [SKILL_AUTHORING_GUIDE.md](SKILL_AUTHORING_GUIDE.md).
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-95 tests, sans Live : `tests/remote_script_harness.py` charge le Remote Script avec de
+101 tests, sans Live : `tests/remote_script_harness.py` charge le Remote Script avec de
 faux objets Live. Toute nouvelle commande doit être testée **à travers
 `_process_command`**, sinon une commande absente des listes de dispatch passe quand même.
 
