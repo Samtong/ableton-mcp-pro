@@ -66,6 +66,7 @@ Roadmap for achieving full Ableton control via MCP.
 ### Advanced
 - [x] **Undo** — `undo()`
 - [x] **Redo** — `redo()`
+- [x] **Set downgrade** — `tools/als_downgrade.py` converts a `.als` saved by a newer Live 12 so 12.0.15 opens it (see `tools/README.md`)
 
 ---
 
