@@ -28,6 +28,7 @@ This fork adds significant capabilities beyond the original:
 - **Browser integration** — Browse and load instruments, effects, and presets by URI
 - **Transport controls** — Tempo, time signature, metronome, record mode
 - **Undo/redo** support
+- **Open newer Live 12 sets in Live 12.0** — `tools/als_downgrade.py` converts a `.als` saved by 12.1+ (e.g. 12.3) so 12.0 opens it, handy when collaborators run a newer Live
 
 See [NEXT_STEPS.md](NEXT_STEPS.md) for the full feature list and roadmap.
 
